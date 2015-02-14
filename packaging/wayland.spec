@@ -1,5 +1,5 @@
 Name:		wayland
-Version:	1.6.0
+Version:	1.7.0
 Release:	0
 Summary:	Wayland Compositor Infrastructure
 License:	MIT
@@ -16,7 +16,6 @@ BuildRequires:	pkgconfig
 BuildRequires:  pkgconfig(libffi)
 BuildRequires:  expat-devel
 BuildRequires:  xz
-BuildRequires:  doxygen
 BuildRequires:  fdupes
 
 %description
@@ -84,8 +83,7 @@ to develop applications that require these.
 cp %{SOURCE1001} .
 
 %build
-%autogen
-%configure --disable-static
+%reconfigure --disable-static --disable-documentation
 make %{?_smp_mflags}
 
 %install
@@ -126,7 +124,6 @@ make %{?_smp_mflags}
 %_libdir/pkgconfig/wayland-*.pc
 %_datadir/wayland/wayland*
 %_datadir/aclocal
-%_datadir/man/man3/*
 %doc README TODO
 
 %changelog
