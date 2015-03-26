@@ -15,8 +15,6 @@ BuildRequires:	libtool >= 2.2
 BuildRequires:	pkgconfig
 BuildRequires:  pkgconfig(libffi)
 BuildRequires:  expat-devel
-BuildRequires:  xz
-BuildRequires:  fdupes
 
 %description
 Wayland is a protocol for a compositor to talk to its clients as well
@@ -88,7 +86,6 @@ make %{?_smp_mflags}
 
 %install
 %make_install
-%fdupes -s %buildroot/%_mandir
 
 %post -n libwayland-client -p /sbin/ldconfig
 %postun -n libwayland-client -p /sbin/ldconfig
