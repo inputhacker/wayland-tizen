@@ -9,6 +9,7 @@ URL:		http://wayland.freedesktop.org/
 #Git-Clone:	git://anongit.freedesktop.org/wayland/wayland
 #Git-Web:	http://cgit.freedesktop.org/wayland/wayland/
 Source:		%name-%version.tar.xz
+Source1001:	%name.manifest
 BuildRequires:	autoconf >= 2.64, automake >= 1.11
 BuildRequires:	libtool >= 2.2
 BuildRequires:	pkgconfig
@@ -77,6 +78,7 @@ to develop applications that require these.
 
 %prep
 %setup -q
+cp %{SOURCE1001} .
 
 %build
 %reconfigure --disable-static --disable-documentation
@@ -93,21 +95,25 @@ make %{?_smp_mflags}
 %postun -n libwayland-server -p /sbin/ldconfig
 
 %files -n libwayland-client
+%manifest %{name}.manifest
 %license COPYING
 %defattr(-,root,root)
 %_libdir/libwayland-client.so.0*
 
 %files -n libwayland-cursor
+%manifest %{name}.manifest
 %license COPYING
 %defattr(-,root,root)
 %_libdir/libwayland-cursor.so.0*
 
 %files -n libwayland-server
+%manifest %{name}.manifest
 %license COPYING
 %defattr(-,root,root)
 %_libdir/libwayland-server.so.0*
 
 %files devel
+%manifest %{name}.manifest
 %defattr(-,root,root)
 %_bindir/wayland-scanner
 %_includedir/wayland-*.h
