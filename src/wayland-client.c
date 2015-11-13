@@ -110,8 +110,6 @@ struct wl_display {
 
 /** \endcond */
 
-static int debug_client = 0;
-
 /**
  * This helper function wakes up all threads that are
  * waiting for display->reader_cond (i. e. when reading is done,

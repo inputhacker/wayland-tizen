@@ -220,6 +220,15 @@ wl_closure_print(struct wl_closure *closure,
 void
 wl_closure_destroy(struct wl_closure *closure);
 
+extern int debug_client;
+extern int debug_server;
+
+void
+wl_debug_client_enable(int enable);
+
+void
+wl_debug_server_enable(int enable);
+
 extern wl_log_func_t wl_log_handler;
 
 void wl_log(const char *fmt, ...);
