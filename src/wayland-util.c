@@ -33,6 +33,9 @@
 #include "wayland-util.h"
 #include "wayland-private.h"
 
+int debug_client = 0;
+int debug_server = 0;
+
 WL_EXPORT void
 wl_list_init(struct wl_list *list)
 {
@@ -387,6 +390,18 @@ wl_map_for_each(struct wl_map *map, wl_iterator_func_t func, void *data)
 	ret = for_each_helper(&map->client_entries, func, data);
 	if (ret == WL_ITERATOR_CONTINUE)
 		for_each_helper(&map->server_entries, func, data);
+}
+
+WL_EXPORT void
+wl_debug_client_enable(int enable)
+{
+	debug_client = !!enable;
+}
+
+WL_EXPORT void
+wl_debug_server_enable(int enable)
+{
+	debug_server = !!enable;
 }
 
 static void

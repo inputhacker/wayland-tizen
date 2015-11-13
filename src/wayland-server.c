@@ -138,8 +138,6 @@ struct wl_protocol_logger {
 	void *user_data;
 };
 
-static int debug_server = 0;
-
 static void
 log_closure(struct wl_resource *resource,
 	    struct wl_closure *closure, int send)
