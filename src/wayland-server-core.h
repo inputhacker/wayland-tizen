@@ -578,6 +578,21 @@ wl_display_add_protocol_logger(struct wl_display *display,
 void
 wl_protocol_logger_destroy(struct wl_protocol_logger *logger);
 
+const char *
+wl_resource_get_name(struct wl_resource *resource);
+
+struct wl_client *
+wl_client_from_link(struct wl_list *link);
+
+struct wl_list *
+wl_client_get_link(struct wl_client *client);
+
+struct wl_list *
+wl_display_get_client_list(struct wl_display *display);
+
+struct wl_map *
+wl_client_get_resources(struct wl_client *client);
+
 #ifdef  __cplusplus
 }
 #endif
