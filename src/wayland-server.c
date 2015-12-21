@@ -752,6 +752,12 @@ wl_resource_get_id(struct wl_resource *resource)
 	return resource->object.id;
 }
 
+WL_EXPORT const char *
+wl_resource_get_name(struct wl_resource *resource)
+{
+   return resource->object.interface->name;
+}
+
 WL_EXPORT struct wl_list *
 wl_resource_get_link(struct wl_resource *resource)
 {
@@ -1821,6 +1827,12 @@ wl_display_add_shm_format(struct wl_display *display, uint32_t format)
 	if (p != NULL)
 		*p = format;
 	return p;
+}
+
+WL_EXPORT struct wl_map *
+wl_client_get_resources(struct wl_client *client)
+{
+	return &client->objects;
 }
 
 /**
