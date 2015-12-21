@@ -164,7 +164,8 @@ built_test_programs =				\
 	message-test				\
 	headers-test				\
 	compositor-introspection-test		\
-	protocol-logger-test
+	protocol-logger-test				\
+	clients-resource-test
 
 if ENABLE_CPP_TEST
 built_test_programs += cpp-compile-test
@@ -232,6 +233,8 @@ newsignal_test_SOURCES = tests/newsignal-test.c src/wayland-server.c
 newsignal_test_LDADD = libtest-runner.la
 resources_test_SOURCES = tests/resources-test.c
 resources_test_LDADD = libtest-runner.la
+clients_resource_test_SOURCES = tests/clients-resource-test.c
+clients_resource_test_LDADD = libtest-runner.la
 message_test_SOURCES = tests/message-test.c
 message_test_LDADD = libtest-runner.la
 compositor_introspection_test_SOURCES = tests/compositor-introspection-test.c
