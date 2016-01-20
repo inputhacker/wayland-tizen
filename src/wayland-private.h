@@ -137,6 +137,9 @@ wl_connection_queue(struct wl_connection *connection,
 int
 wl_connection_get_fd(struct wl_connection *connection);
 
+int
+wl_connection_get_fd(struct wl_connection *connection);
+
 struct wl_closure {
 	int count;
 	const struct wl_message *message;
