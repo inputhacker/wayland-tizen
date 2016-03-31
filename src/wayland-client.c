@@ -41,14 +41,11 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
-#include <sys/syscall.h>
 
 #include "wayland-util.h"
 #include "wayland-os.h"
 #include "wayland-client.h"
 #include "wayland-private.h"
-
-#define FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
 
 /** \cond */
 
@@ -79,11 +76,6 @@ struct wl_global {
 struct wl_event_queue {
 	struct wl_list event_list;
 	struct wl_display *display;
-
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	pid_t tid;
-	struct wl_list link;
-#endif
 };
 
 struct wl_display {
@@ -116,11 +108,6 @@ struct wl_display {
 	int reader_count;
 	uint32_t read_serial;
 	pthread_cond_t reader_cond;
-
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	pid_t tid;
-	struct wl_list queue_list;
-#endif
 };
 
 /** \endcond */
@@ -231,10 +218,6 @@ wl_event_queue_init(struct wl_event_queue *queue, struct wl_display *display)
 {
 	wl_list_init(&queue->event_list);
 	queue->display = display;
-
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	wl_list_insert(&display->queue_list, &queue->link);
-#endif
 }
 
 static void
@@ -313,9 +296,6 @@ wl_event_queue_destroy(struct wl_event_queue *queue)
 
 	pthread_mutex_lock(&display->mutex);
 	wl_event_queue_release(queue);
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	wl_list_remove(&queue->link);
-#endif
 	free(queue);
 	pthread_mutex_unlock(&display->mutex);
 }
@@ -337,13 +317,7 @@ wl_display_create_queue(struct wl_display *display)
 	if (queue == NULL)
 		return NULL;
 
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	pthread_mutex_lock(&display->mutex);
-#endif
 	wl_event_queue_init(queue, display);
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	pthread_mutex_unlock(&display->mutex);
-#endif
 
 	return queue;
 }
@@ -1092,9 +1066,6 @@ sync_callback(void *data, struct wl_callback *callback, uint32_t serial)
 {
 	int *done = data;
 
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	if (done)
-#endif
 	*done = 1;
 	wl_callback_destroy(callback);
 }
@@ -1446,29 +1417,6 @@ wl_display_read_events(struct wl_display *display)
 {
 	int ret;
 
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-		/* Workaround solution until resolving the below bug.
-		 * https://bugs.freedesktop.org/show_bug.cgi?id=91273
-		 * Sometimes sub-thread reads all events from display fd too fast for
-		 * main-thread to awake from poll waiting. If main-thread's queues is not
-		 * empty, we will forcely awake main-thread from poll waiting. When
-		 * main-thread awakes, queues will be dispatched.
-		 */
-		if (display->tid != syscall(SYS_gettid)) {
-			struct wl_event_queue *temp;
-			wl_list_for_each(temp, &display->queue_list, link) {
-				if (temp->tid == 0 || temp->tid == display->tid) {
-					if (!wl_list_empty(&temp->event_list)) {
-						struct wl_callback *callback = wl_display_sync(display);
-						if (callback)
-							wl_callback_add_listener(callback, &sync_listener, NULL);
-						break;
-					}
-				}
-			}
-		}
-#endif
-
 	pthread_mutex_lock(&display->mutex);
 
 	if (display->last_error) {
@@ -1578,14 +1526,6 @@ wl_display_prepare_read_queue(struct wl_display *display,
 	int ret;
 
 	pthread_mutex_lock(&display->mutex);
-
-#ifdef FIX_WAYLAND_CLIENT_FD_POOLING_BUG_IN_MULTITHREAD
-	/* if queue->tid is not same with display->tid, then we can guess this queue
-	 * will be handled in sub-thread.
-	 */
-	if (queue->tid == 0)
-		queue->tid = syscall(SYS_gettid);
-#endif
 
 	if (!wl_list_empty(&queue->event_list)) {
 		errno = EAGAIN;
