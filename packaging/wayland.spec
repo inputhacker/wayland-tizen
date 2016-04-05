@@ -1,5 +1,5 @@
 Name:		wayland
-Version:	1.8.0
+Version:	1.10.0
 Release:	0
 Summary:	Wayland Compositor Infrastructure
 License:	MIT
@@ -15,6 +15,7 @@ BuildRequires:	libtool >= 2.2
 BuildRequires:	pkgconfig
 BuildRequires:  pkgconfig(libffi)
 BuildRequires:  expat-devel
+BuildRequires:  pkgconfig(libxml-2.0)
 
 %description
 Wayland is a protocol for a compositor to talk to its clients as well
