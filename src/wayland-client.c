@@ -87,6 +87,14 @@ struct wl_event_queue {
 	struct wl_display *display;
 };
 
+struct wl_thread_data {
+	struct wl_list link;
+	int reader_count_in_thread;
+	int state;
+	int pid;
+	int tid;
+};
+
 struct wl_display {
 	struct wl_proxy proxy;
 	struct wl_connection *connection;
@@ -118,6 +126,9 @@ struct wl_display {
 	int reader_count;
 	uint32_t read_serial;
 	pthread_cond_t reader_cond;
+
+	pthread_key_t thread_data_key;
+	struct wl_list	threads;
 };
 
 /** \endcond */
@@ -998,6 +1009,39 @@ wl_proxy_marshal_array(struct wl_proxy *proxy, uint32_t opcode,
 }
 
 static void
+destroy_thread_data(void *data)
+{
+	struct wl_thread_data *thread_data = data;
+
+	wl_list_remove(&thread_data->link);
+	wl_log("Thread removed[%p pid:%d tid: %d]\n", thread_data, thread_data->pid, thread_data->tid);
+	
+	free(thread_data);
+}
+
+static struct wl_thread_data*
+get_thread_data(struct wl_display *display)
+{
+	struct wl_thread_data *thread_data;
+
+	thread_data = pthread_getspecific(display->thread_data_key);
+	if (!thread_data) {
+		thread_data = zalloc(sizeof *thread_data);
+		if (!thread_data)
+			return NULL;
+		thread_data->reader_count_in_thread = 0;
+		pthread_setspecific(display->thread_data_key, thread_data);
+
+		thread_data->pid = (int)getpid();
+		thread_data->tid = (int)syscall(SYS_gettid);
+		wl_list_insert(&display->threads, &thread_data->link);
+		wl_log("Thread added[%p, pid:%d tid: %d] to display:%p\n", thread_data, thread_data->pid, thread_data->tid, display);
+	}
+
+	return thread_data;
+}
+
+static void
 display_handle_error(void *data,
 		     struct wl_display *display, void *object,
 		     uint32_t code, const char *message)
@@ -1152,6 +1196,7 @@ WL_EXPORT struct wl_display *
 wl_display_connect_to_fd(int fd)
 {
 	struct wl_display *display;
+	struct wl_thread_data *thread_data;
 	const char *debug;
 
 	debug = getenv("WAYLAND_DLOG");
@@ -1216,6 +1261,14 @@ wl_display_connect_to_fd(int fd)
 
 	display->connection = wl_connection_create(display->fd);
 	if (display->connection == NULL)
+		goto err_connection;
+
+	wl_list_init(&display->threads);
+	if (pthread_key_create(&display->thread_data_key, destroy_thread_data) < 0)
+		goto err_connection;
+
+	thread_data = get_thread_data(display);
+	if (!thread_data)
 		goto err_connection;
 
 #ifdef WL_DEBUG_QUEUE
@@ -1303,7 +1356,13 @@ wl_display_connect(const char *name)
 WL_EXPORT void
 wl_display_disconnect(struct wl_display *display)
 {
+	struct wl_thread_data *thread_data;
+
 	pthread_mutex_lock(&display->mutex);
+
+	thread_data = get_thread_data(display);
+	destroy_thread_data(thread_data);
+	pthread_key_delete(display->thread_data_key);
 
 	wl_connection_destroy(display->connection);
 	wl_map_for_each(&display->objects, free_zombies, NULL);
@@ -1606,10 +1665,20 @@ dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 static int
 read_events(struct wl_display *display)
 {
+	struct wl_thread_data *thread_data;
 	int total, rem, size;
 	uint32_t serial;
 
+	thread_data = get_thread_data(display);
+	assert(thread_data);
+
+	thread_data->reader_count_in_thread--;
 	display->reader_count--;
+	if (thread_data->reader_count_in_thread) {
+		wl_log("read_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)", thread_data, thread_data->pid, thread_data->tid,
+						thread_data->reader_count_in_thread, display->reader_count);
+	}
+
 	if (display->reader_count == 0) {
 		total = wl_connection_read(display->connection);
 		if (total < 0 && errno != EAGAIN && errno != EPIPE)
@@ -1619,6 +1688,9 @@ read_events(struct wl_display *display)
 				/* we must wake up threads whenever
 				 * the reader_count dropped to 0 */
 				display_wakeup_threads(display);
+
+				if (thread_data->reader_count_in_thread > 0)
+					display->reader_count++;
 
 				return 0;
 			}
@@ -1660,15 +1732,35 @@ read_events(struct wl_display *display)
 		}
 	}
 
+	/* If reader_count_in_thread > 0, it means that this thread is still polling
+	 * in somewhere. So inclease +1 for it.
+	 */
+	if (thread_data->reader_count_in_thread > 0)
+		display->reader_count++;
+
 	return 0;
 }
 
 static void
 cancel_read(struct wl_display *display)
 {
+	struct wl_thread_data *thread_data;
+
+	thread_data = get_thread_data(display);
+	assert(thread_data);
+
+	thread_data->reader_count_in_thread--;
 	display->reader_count--;
+	if (thread_data->reader_count_in_thread) {
+		wl_log("Cancel_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)\n", thread_data, thread_data->pid, thread_data->tid,
+						thread_data->reader_count_in_thread, display->reader_count);
+	}
+	
 	if (display->reader_count == 0)
 		display_wakeup_threads(display);
+
+	if (thread_data->reader_count_in_thread > 0)
+		display->reader_count++;
 }
 
 /** Read events from display file descriptor
@@ -1827,7 +1919,19 @@ wl_display_prepare_read_queue(struct wl_display *display,
 		errno = EAGAIN;
 		ret = -1;
 	} else {
-		display->reader_count++;
+		struct wl_thread_data *thread_data;
+
+		thread_data = get_thread_data(display);
+		assert(thread_data);
+
+		/* increase +1 per thread */
+		if (thread_data->reader_count_in_thread == 0)
+			display->reader_count++;
+		else {
+			wl_log("Prepare_read[%d]: check reader count(T:%d, A:%d)\n", thread_data->tid, thread_data->reader_count_in_thread, display->reader_count);
+		}
+
+		thread_data->reader_count_in_thread++;
 		ret = 0;
 	}
 
