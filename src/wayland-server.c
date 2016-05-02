@@ -124,6 +124,8 @@ struct wl_resource {
 	wl_dispatcher_func_t dispatcher;
 };
 
+wl_server_debug_func_ptr wl_server_debug_func = NULL;
+
 struct wl_protocol_logger {
 	struct wl_list link;
 	wl_protocol_logger_func_t func;
@@ -138,6 +140,9 @@ log_closure(struct wl_resource *resource,
 	struct wl_display *display = resource->client->display;
 	struct wl_protocol_logger *protocol_logger;
 	struct wl_protocol_logger_message message;
+
+	if (wl_server_debug_func)
+		wl_server_debug_func(closure, resource, false);
 
 	if (debug_server)
 		wl_closure_print(closure, object, send);
@@ -156,6 +161,17 @@ log_closure(struct wl_resource *resource,
 					      &message);
 		}
 	}
+}
+
+WL_EXPORT wl_server_debug_func_ptr
+wl_debug_server_debug_func_set(wl_server_debug_func_ptr debug_func)
+{
+	wl_server_debug_func_ptr old_debug_func;
+
+	old_debug_func = wl_server_debug_func;
+	wl_server_debug_func = debug_func;
+
+	return old_debug_func;
 }
 
 WL_EXPORT void
