@@ -35,8 +35,6 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define WL_HIDE_DEPRECATED
-
 #include "test-runner.h"
 #include "test-compositor.h"
 
