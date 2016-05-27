@@ -286,6 +286,7 @@ is_debugger_attached(void)
 	int rc;
 	pid_t pid;
 	int pipefd[2];
+	int num;
 
 	if (pipe(pipefd) == -1) {
 		perror("pipe");
@@ -304,7 +305,9 @@ is_debugger_attached(void)
 
 		/* Wait until parent is ready */
 		close(pipefd[1]);  /* Close unused write end */
-		read(pipefd[0], &buf, 1);
+		num = read(pipefd[0], &buf, 1);
+		if (num < 0)
+			_exit(1);
 		close(pipefd[0]);
 		if (buf == '-')
 			_exit(1);
@@ -327,10 +330,14 @@ is_debugger_attached(void)
 			 * Then flag the error state to the client by sending '-'.
 			 */
 			perror("prctl");
-			write(pipefd[1], "-", 1);
+			num = write(pipefd[1], "-", 1);
+			if (num < 0)
+				_exit(1);
 		} else {
 			/* Signal to client that parent is ready by passing '+' */
-			write(pipefd[1], "+", 1);
+			num = write(pipefd[1], "+", 1);
+			if (num < 0)
+				_exit(1);
 		}
 		close(pipefd[1]);
 
