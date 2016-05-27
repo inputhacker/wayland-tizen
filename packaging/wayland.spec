@@ -82,6 +82,7 @@ to develop applications that require these.
 cp %{SOURCE1001} .
 
 %build
+export CFLAGS+=" -Werror "
 %reconfigure --disable-static --disable-documentation
 make %{?_smp_mflags}
 
