@@ -41,6 +41,13 @@
 #include <unistd.h>
 
 #if HAVE_LIBXML
+/* XMLCALL exportable macro is defined in two header files on i586.
+ * (expat_external.h and xmlexports.h)
+ * In order to avoid redefined error, we should put undef that macro.
+ */
+#ifdef XMLCALL
+# undef XMLCALL
+#endif
 #include <libxml/parser.h>
 
 /* Embedded wayland.dtd file, see dtddata.S */
