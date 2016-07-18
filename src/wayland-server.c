@@ -42,6 +42,7 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 
 #include "wayland-util.h"
 #include "wayland-private.h"
@@ -153,7 +154,7 @@ log_closure(struct wl_resource *resource,
 	struct wl_protocol_logger_message message;
 
 	if (debug_server)
-		wl_closure_print(closure, object, send);
+		wl_closure_print(closure, object, send, (resource->client)?resource->client->ucred.pid:0);
 
 	if (!wl_list_empty(&display->protocol_loggers)) {
 		message.resource = resource;
@@ -330,6 +331,8 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	}
 
 	if (mask & WL_EVENT_WRITABLE) {
+		if (debug_thread)
+			wl_log("%d(%d): flush, %s(%d)\n", getpid(), (int)syscall(SYS_gettid), __FUNCTION__, __LINE__);
 		len = wl_connection_flush(connection);
 		if (len < 0 && errno != EAGAIN && errno != EPIPE)
 			wl_log("client_proc(%s) flush failed: len(%d) errno(%d)\n",
@@ -458,6 +461,9 @@ WL_EXPORT void
 wl_client_flush(struct wl_client *client)
 {
 	int ret = wl_connection_flush(client->connection);
+
+	if (debug_thread)
+		wl_log("%d(%d): flush, %s(%d)\n", getpid(), (int)syscall(SYS_gettid), __FUNCTION__, __LINE__);
 
 	if (ret < 0 && errno != EAGAIN && errno != EPIPE)
 		wl_log("client_proc(%s) flush failed: ret(%d) errno(%d)\n",
@@ -1053,15 +1059,12 @@ WL_EXPORT struct wl_display *
 wl_display_create(void)
 {
 	struct wl_display *display;
-	const char *debug;
 
-	debug = getenv("WAYLAND_DLOG");
-	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
-		debug_dlog = 1;
+	debug_dlog = 1;
 
-	debug = getenv("WAYLAND_DEBUG");
-	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
-		debug_server = 1;
+	debug_server = 1;
+
+	debug_thread = 1;
 
 	display = malloc(sizeof *display);
 	if (display == NULL)

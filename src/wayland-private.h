@@ -253,13 +253,14 @@ wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection);
 
 void
 wl_closure_print(struct wl_closure *closure,
-		 struct wl_object *target, int send);
+		 struct wl_object *target, int send, int pid);
 
 void
 wl_closure_destroy(struct wl_closure *closure);
 
 extern int debug_client;
 extern int debug_server;
+extern int debug_thread;
 
 void
 wl_debug_client_enable(int enable);

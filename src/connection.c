@@ -409,6 +409,9 @@ wl_connection_flush(struct wl_connection *connection)
 	if (!connection->want_flush)
 		return 0;
 
+	if (debug_thread)
+		wl_log("wayland flush %s(%d)\n", __FUNCTION__, __LINE__);
+
 	tail = connection->out.tail;
 	while (connection->out.head - connection->out.tail > 0) {
 		wl_buffer_get_iov(&connection->out, iov, &count);
@@ -1397,7 +1400,7 @@ wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection)
 }
 
 void
-wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send)
+wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send, int pid)
 {
 	int i;
 	struct argument_details arg;
@@ -1411,9 +1414,9 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send)
 	clock_gettime(CLOCK_REALTIME, &tp);
 	time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
 
-	WL_SNPRINTF(buf, len, "[%d][%d][%10.3f] %s%s@%u.%s(", (int)getpid(), (int)syscall(SYS_gettid),
+	WL_SNPRINTF(buf, len, "[%d][%d][%10.3f] %s(%d)%s@%u.%s(", (int)getpid(), (int)syscall(SYS_gettid),
 		time / 1000.0,
-		send ? " -> " : "",
+		send ? " -> " : "", pid,
 		target->interface->name, target->id,
 		closure->message->name);
 

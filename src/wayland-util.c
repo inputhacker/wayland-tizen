@@ -42,6 +42,7 @@
 
 int debug_client = 0;
 int debug_server = 0;
+int debug_thread = 0;
 
 WL_EXPORT void
 wl_list_init(struct wl_list *list)

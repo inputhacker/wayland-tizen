@@ -43,6 +43,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/syscall.h>
 
 #include "wayland-util.h"
 #include "wayland-os.h"
@@ -138,6 +139,9 @@ display_wakeup_threads(struct wl_display *display)
 	 * This prevents from indefinite sleeping in read_events().
 	 */
 	++display->read_serial;
+
+	if (debug_thread)
+		wl_log("%d(%d): wake all threads up %s(%d)\n", getpid(), (int)syscall(SYS_gettid), __FUNCTION__, __LINE__);
 
 	pthread_cond_broadcast(&display->reader_cond);
 }
@@ -747,13 +751,13 @@ wl_proxy_marshal_array_constructor_versioned(struct wl_proxy *proxy,
 		wl_abort("Error marshalling request: %s\n", strerror(errno));
 
 	if (debug_client)
-		wl_closure_print(closure, &proxy->object, true);
+		wl_closure_print(closure, &proxy->object, true, 0);
 
     if (wl_closure_send(closure, proxy->display->connection))
       // TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
       {
          if (errno == EAGAIN) {
-              wl_closure_print(closure, &proxy->object, true);
+              wl_closure_print(closure, &proxy->object, true, 0);
               wl_print_connection_data(proxy->display->connection, OUT);
               print_map_client_enteries(&(proxy->display->objects));
          }
@@ -920,7 +924,10 @@ get_thread_data(struct wl_display *display)
 			return NULL;
 		thread_data->reader_count_in_thread = 0;
 		pthread_setspecific(display->thread_data_key, thread_data);
+      wl_log("%d(%d): display(%p) thread_data(%p) create", getpid(), (int)syscall(SYS_gettid), display, thread_data);
 	}
+   else
+      wl_log("%d(%d): display(%p) thread_data(%p)", getpid(), (int)syscall(SYS_gettid), display, thread_data);
 
 	return thread_data;
 }
@@ -1050,15 +1057,12 @@ wl_display_connect_to_fd(int fd)
 {
 	struct wl_display *display;
 	struct wl_thread_data *thread_data;
-	const char *debug;
 
-	debug = getenv("WAYLAND_DLOG");
-	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
-		debug_dlog = 1;
+	debug_dlog = 1;
 
-	debug = getenv("WAYLAND_DEBUG");
-	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
-		debug_client = 1;
+	debug_client = 1;
+
+	debug_thread = 1;
 
 	display = zalloc(sizeof *display);
 	if (display == NULL) {
@@ -1446,7 +1450,7 @@ queue_event(struct wl_display *display, int len)
 #ifdef WL_DEBUG_QUEUE
 	if (debug_client) {
 		wl_dlog("display_q(%p) default_q(%p) queue(%p) add event", &display->display_queue, &display->default_queue, queue);
-		wl_closure_print(closure, &proxy->object, false);
+		wl_closure_print(closure, &proxy->object, false, 0);
 	}
 #endif
 
@@ -1488,13 +1492,13 @@ dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 
 	if (proxy->dispatcher) {
 		if (debug_client)
-			wl_closure_print(closure, &proxy->object, false);
+			wl_closure_print(closure, &proxy->object, false, 0);
 
 		wl_closure_dispatch(closure, proxy->dispatcher,
 				    &proxy->object, opcode);
 	} else if (proxy->object.implementation) {
 		if (debug_client)
-			wl_closure_print(closure, &proxy->object, false);
+			wl_closure_print(closure, &proxy->object, false, 0);
 
 		wl_closure_invoke(closure, WL_CLOSURE_INVOKE_CLIENT,
 				  &proxy->object, opcode, proxy->user_data);
@@ -1517,6 +1521,8 @@ read_events(struct wl_display *display)
 
 	thread_data->reader_count_in_thread--;
 	display->reader_count--;
+	if (debug_thread)
+		wl_log("%d(%d): reader_count(%d) %s(%d)\n", getpid(), (int)syscall(SYS_gettid), display->reader_count, __FUNCTION__, __LINE__);
 	if (display->reader_count == 0) {
 		total = wl_connection_read(display->connection);
 		if (total < 0 && errno != EAGAIN && errno != EPIPE)
@@ -1527,8 +1533,11 @@ read_events(struct wl_display *display)
 				 * the reader_count dropped to 0 */
 				display_wakeup_threads(display);
 
-				if (thread_data->reader_count_in_thread > 0)
+				if (thread_data->reader_count_in_thread > 0) {
 					display->reader_count++;
+					if (debug_thread)
+						wl_log("%d(%d): reader_count(%d) %s(%d)\n", getpid(), (int)syscall(SYS_gettid), display->reader_count, __FUNCTION__, __LINE__);
+				}
 
 				return 0;
 			}
@@ -1560,9 +1569,14 @@ read_events(struct wl_display *display)
 		display_wakeup_threads(display);
 	} else {
 		serial = display->read_serial;
-		while (display->read_serial == serial)
+		while (display->read_serial == serial) {
+			if (debug_thread)
+				wl_log("%d(%d): sleep %s(%d)\n", getpid(), (int)syscall(SYS_gettid), __FUNCTION__, __LINE__);
 			pthread_cond_wait(&display->reader_cond,
 					  &display->mutex);
+			if (debug_thread)
+				wl_log("%d(%d): woke up %s(%d)\n", getpid(), (int)syscall(SYS_gettid), __FUNCTION__, __LINE__);
+		}
 
 		if (display->last_error) {
 			errno = display->last_error;
@@ -1573,8 +1587,11 @@ read_events(struct wl_display *display)
 	/* If reader_count_in_thread > 0, it means that this thread is still polling
 	 * in somewhere. So inclease +1 for it.
 	 */
-	if (thread_data->reader_count_in_thread > 0)
+	if (thread_data->reader_count_in_thread > 0) {
 		display->reader_count++;
+		if (debug_thread)
+			wl_log("%d(%d): reader_count(%d) %s(%d)\n", getpid(), (int)syscall(SYS_gettid), display->reader_count, __FUNCTION__, __LINE__);
+	}
 
 	return 0;
 }
@@ -1589,11 +1606,16 @@ cancel_read(struct wl_display *display)
 
 	thread_data->reader_count_in_thread--;
 	display->reader_count--;
+	if (debug_thread)
+		wl_log("%d(%d): reader_count(%d) %s(%d)\n", getpid(), (int)syscall(SYS_gettid), display->reader_count, __FUNCTION__, __LINE__);
 	if (display->reader_count == 0)
 		display_wakeup_threads(display);
 
-	if (thread_data->reader_count_in_thread > 0)
+	if (thread_data->reader_count_in_thread > 0) {
 		display->reader_count++;
+		if (debug_thread)
+			wl_log("%d(%d): reader_count(%d) %s(%d)\n", getpid(), (int)syscall(SYS_gettid), display->reader_count, __FUNCTION__, __LINE__);
+	}
 }
 
 /** Read events from display file descriptor
@@ -1757,8 +1779,11 @@ wl_display_prepare_read_queue(struct wl_display *display,
 		assert(thread_data);
 
 		/* increase +1 per thread */
-		if (thread_data->reader_count_in_thread == 0)
+		if (thread_data->reader_count_in_thread == 0) {
 			display->reader_count++;
+			if (debug_thread)
+				wl_log("%d(%d): reader_count(%d) %s(%d)\n", getpid(), (int)syscall(SYS_gettid), display->reader_count, __FUNCTION__, __LINE__);
+		}
 
 		thread_data->reader_count_in_thread++;
 		ret = 0;
@@ -2105,6 +2130,8 @@ wl_display_flush(struct wl_display *display)
 		 * read events after the failed flush. When the compositor sends
 		 * an error it will close the socket, and if we make EPIPE fatal
 		 * here we don't get a chance to process the error. */
+		if (debug_thread)
+			wl_log("%d(%d): flush %s(%d)\n", getpid(), (int)syscall(SYS_gettid), __FUNCTION__, __LINE__);
 		ret = wl_connection_flush(display->connection);
 		if (ret < 0 && errno != EAGAIN && errno != EPIPE)
 			display_fatal_error(display, errno);
