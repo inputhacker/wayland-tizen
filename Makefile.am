@@ -160,7 +160,8 @@ TESTS =						\
 	resources-test				\
 	message-test				\
 	headers-test				\
-	clients-resource-test
+	clients-resource-test	\
+	protocol-logger-test
 
 if ENABLE_CPP_TEST
 TESTS += cpp-compile-test
@@ -219,6 +220,8 @@ clients_resource_test_SOURCES = tests/clients-resource-test.c
 clients_resource_test_LDADD = libtest-runner.la
 message_test_SOURCES = tests/message-test.c
 message_test_LDADD = libtest-runner.la
+protocol_logger_test_SOURCES = tests/protocol-logger-test.c
+protocol_logger_test_LDADD = libtest-runner.la
 headers_test_SOURCES = tests/headers-test.c \
 		       tests/headers-protocol-test.c \
 		       tests/headers-protocol-core-test.c

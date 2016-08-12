@@ -502,6 +502,30 @@ wl_display_get_client_list(struct wl_display *display);
 struct wl_map *
 wl_client_get_resources(struct wl_client *client);
 
+enum wl_protocol_logger_type {
+	WL_PROTOCOL_LOGGER_REQUEST,
+	WL_PROTOCOL_LOGGER_EVENT,
+};
+
+struct wl_protocol_logger_message {
+	struct wl_resource *resource;
+	int message_opcode;
+	const struct wl_message *message;
+	int arguments_count;
+	const union wl_argument *arguments;
+};
+
+typedef void (*wl_protocol_logger_func_t)(void *user_data,
+					  enum wl_protocol_logger_type direction,
+					  const struct wl_protocol_logger_message *message);
+
+struct wl_protocol_logger *
+wl_display_add_protocol_logger(struct wl_display *display,
+			       wl_protocol_logger_func_t, void *user_data);
+
+void
+wl_protocol_logger_destroy(struct wl_protocol_logger *logger);
+
 #ifdef  __cplusplus
 }
 #endif
