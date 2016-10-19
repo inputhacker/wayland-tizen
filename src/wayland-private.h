@@ -117,6 +117,9 @@ wl_connection_copy(struct wl_connection *connection, void *data, size_t size);
 void
 wl_connection_consume(struct wl_connection *connection, size_t size);
 
+void
+wl_connection_consume_fds_in(struct wl_connection *connection);
+
 int
 wl_connection_flush(struct wl_connection *connection);
 
