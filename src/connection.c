@@ -243,6 +243,12 @@ wl_connection_consume(struct wl_connection *connection, size_t size)
 	connection->in.tail += size;
 }
 
+void
+wl_connection_consume_fds_in(struct wl_connection *connection)
+{
+	close_fds(&connection->fds_in, -1);
+}
+
 static void
 build_cmsg(struct wl_buffer *buffer, char *data, int *clen)
 {
@@ -1219,6 +1225,31 @@ overflow:
 	return -1;
 }
 
+static int
+closure_has_fds(struct wl_closure *closure)
+{
+	const struct wl_message *message = closure->message;
+	int i, count;
+	struct argument_details arg;
+	const char *signature;
+
+	signature = message->signature;
+	count = arg_count_for_signature(signature);
+	for (i = 0; i < count; i++) {
+		signature = get_next_argument(signature, &arg);
+
+		switch (arg.type) {
+		case 'h':
+			return 1;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return 0;
+}
+
 int
 wl_closure_send(struct wl_closure *closure, struct wl_connection *connection)
 {
@@ -1226,6 +1257,11 @@ wl_closure_send(struct wl_closure *closure, struct wl_connection *connection)
 	uint32_t buffer_size;
 	uint32_t *buffer;
 	int result;
+	int need_flush;
+
+	need_flush = closure_has_fds(closure);
+	if (need_flush)
+		wl_connection_flush(connection);
 
 	if (copy_fds_to_connection(closure, connection))
 		return -1;
@@ -1245,6 +1281,9 @@ wl_closure_send(struct wl_closure *closure, struct wl_connection *connection)
 
 	result = wl_connection_write(connection, buffer, size);
 	free(buffer);
+
+	if (need_flush)
+		wl_connection_flush(connection);
 
 	return result;
 }
