@@ -36,6 +36,20 @@ extern "C" {
 struct wl_egl_window;
 struct wl_surface;
 
+enum wl_egl_window_capability {
+	WL_EGL_WINDOW_CAPABILITY_NONE = 0,
+	WL_EGL_WINDOW_CAPABILITY_ROTATION_SUPPORTED = (1 << 0),
+	WL_EGL_WINDOW_CAPABILITY_ROTATION_UNSUPPORTED = (1 << 1),
+	WL_EGL_WINDOW_CAPABILITY_ROTATION_UNKNOWN = (1 << 2),
+};
+
+typedef enum {
+	ROTATION_0 = 0,
+	ROTATION_90 = 90,
+	ROTATION_180 = 180,
+	ROTATION_270 = 270
+} wl_egl_window_rotation;
+
 struct wl_egl_window *
 wl_egl_window_create(struct wl_surface *surface,
 		     int width, int height);
@@ -51,6 +65,13 @@ wl_egl_window_resize(struct wl_egl_window *egl_window,
 void
 wl_egl_window_get_attached_size(struct wl_egl_window *egl_window,
 				int *width, int *height);
+
+void
+wl_egl_window_set_rotation(struct wl_egl_window *egl_window,
+			   wl_egl_window_rotation rotation);
+
+int
+wl_egl_window_get_capabilities(struct wl_egl_window *egl_window);
 
 #ifdef  __cplusplus
 }
