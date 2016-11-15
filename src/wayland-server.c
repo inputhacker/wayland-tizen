@@ -632,20 +632,6 @@ wl_client_get_object(struct wl_client *client, uint32_t id)
 	return wl_map_lookup(&client->objects, id);
 }
 
-WL_EXPORT struct wl_client *
-wl_client_from_link(struct wl_list *link)
-{
-	struct wl_client *client;
-
-	return wl_container_of(link, client, link);
-}
-
-WL_EXPORT struct wl_list *
-wl_client_get_link(struct wl_client *client)
-{
-	return &client->link;
-}
-
 WL_EXPORT void
 wl_client_post_no_memory(struct wl_client *client)
 {
@@ -1771,13 +1757,6 @@ wl_display_add_shm_format(struct wl_display *display, uint32_t format)
 	if (p != NULL)
 		*p = format;
 	return p;
-}
-
-
-WL_EXPORT struct wl_list *
-wl_display_get_client_list(struct wl_display *display)
-{
-	return &display->client_list;
 }
 
 WL_EXPORT struct wl_map *
