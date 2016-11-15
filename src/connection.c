@@ -1149,6 +1149,11 @@ wl_closure_send(struct wl_closure *closure, struct wl_connection *connection)
 	uint32_t buffer_size;
 	uint32_t *buffer;
 	int result;
+	int need_flush;
+
+	need_flush = closure_has_fds(closure);
+	if (need_flush)
+		wl_connection_flush(connection);
 
 	if (copy_fds_to_connection(closure, connection))
 		return -1;
@@ -1180,11 +1185,6 @@ wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection)
 	uint32_t buffer_size;
 	uint32_t *buffer;
 	int result;
-	int need_flush;
-
-	need_flush = closure_has_fds(closure);
-	if (need_flush)
-		wl_connection_flush(connection);
 
 	if (copy_fds_to_connection(closure, connection))
 		return -1;
