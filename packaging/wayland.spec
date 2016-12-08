@@ -82,6 +82,8 @@ to develop applications that require these.
 cp %{SOURCE1001} .
 
 %build
+export CFLAGS=$( echo $CFLAGS | sed -e "s/-flto//g" )
+export CXXFLAGS=$( echo $CXXFLAGS | sed -e "s/-flto//g" )
 %reconfigure --disable-static --disable-documentation
 make %{?_smp_mflags}
 
