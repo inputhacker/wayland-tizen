@@ -62,4 +62,11 @@ void
 xcursor_load_theme(const char *theme, int size,
 		    void (*load_callback)(XcursorImages *, void *),
 		    void *user_data);
+
+/*TIZEN_ONLY start*/
+int
+xcursor_load_theme_cursor_name(const char *theme, int size,
+		    void (*load_callback)(XcursorImages *, void *),
+		    void *user_data, const char* name);
+/*TIZEN_ONLY end*/
 #endif
