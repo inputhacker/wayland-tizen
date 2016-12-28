@@ -969,3 +969,118 @@ xcursor_load_theme(const char *theme, int size,
 	if (inherits)
 		free(inherits);
 }
+
+/*TIZEN_ONLY start*/
+static int
+load_cursor_from_path(const char *path, int size,
+			  void (*load_callback)(XcursorImages *, void *),
+			  void *user_data, const char* name)
+{
+	FILE *f;
+	XcursorImages *images;
+
+	if (!path)
+		return 0;
+	f = fopen(path, "r");
+	if (!f) {
+		return 0;
+	}
+
+	images = XcursorFileLoadImages(f, size);
+
+	if (images) {
+		XcursorImagesSetName(images, name);
+		load_callback(images, user_data);
+		fclose (f);
+		return 1;
+	}
+	else {
+		fclose (f);
+		return 0;
+	}
+}
+
+/** Load the cursor specified by 'name' from a given theme
+ *
+ * This function loads a specified cursor of a given theme and if not
+ * found in it, it loads it from its inherited themes.
+ *.The cursor is loaded into an XcursorImages object
+ * which is passed to the caller's load callback to add it to the theme.
+ * If a cursor appears more than once across the current theme and
+ * all the inherited themes, current theme cursor take precedence
+ * and if cursor is not found in the current theme, the theme which
+ *.is listed first in inherits list will take precedence and cursor will
+ *.be loaded from that theme.
+ *.Cursors from other inherited themes with same cursor name will
+ * be ignored and will not be loaded.
+ *
+ * \param theme The name of theme that should be loaded
+ * \param size The desired size of the cursor images
+ * \param load_callback A callback function that will be called
+ * for each cursor loaded. The first parameter is the XcursorImages
+ * object representing the loaded cursor and the second is a pointer
+ * to data provided by the user.
+ * \param user_data The data that should be passed to the load callback
+ */
+
+
+int
+xcursor_load_theme_cursor_name(const char *theme, int size,
+		    void (*load_callback)(XcursorImages *, void *),
+		    void *user_data, const char* name)
+{
+	char *full, *dir;
+	char *inherits = NULL;
+	const char *path, *i;
+	int found = 0;
+
+	if (!theme)
+		theme = "default";
+
+	for (path = XcursorLibraryPath();
+	     path;
+	     path = _XcursorNextPath(path)) {
+		dir = _XcursorBuildThemeDir(path, theme);
+		if (!dir)
+			continue;
+
+		full = _XcursorBuildFullname(dir, "cursors", name);
+
+		if (full) {
+			found = load_cursor_from_path(full, size, load_callback,
+						  user_data, name);
+			free(full);
+			full = NULL;
+
+			if (found) {
+				free(dir);
+				dir = NULL;
+				return 1;
+			}
+		}
+
+
+		if (!inherits) {
+			full = _XcursorBuildFullname(dir, "cursors", "index.theme");
+			if (full) {
+				inherits = _XcursorThemeInherits(full);
+				free(full);
+				full = NULL;
+			}
+		}
+		free(dir);
+		dir = NULL;
+	}
+
+	for (i = inherits; i; i = _XcursorNextPath(i)) {
+		found = xcursor_load_theme_cursor_name(i, size, load_callback, user_data, name);
+		if (found)
+			break;
+	}
+
+	if (inherits)
+		free(inherits);
+
+	return found;
+}
+/*TIZEN_ONLY end*/
