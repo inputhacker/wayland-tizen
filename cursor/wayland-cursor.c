@@ -373,6 +373,49 @@ load_callback(XcursorImages *images, void *data)
 	XcursorImagesDestroy(images);
 }
 
+static void
+load_callback_ondemand_loader(XcursorImages *images, void *data)
+{
+	struct wl_cursor_theme *theme = data;
+	struct wl_cursor *cursor;
+
+	cursor = wl_cursor_create_from_xcursor_images(images, theme);
+
+	if (cursor) {
+		theme->cursor_count++;
+		theme->cursors =
+			realloc(theme->cursors,
+				theme->cursor_count * sizeof theme->cursors[0]);
+
+		if (theme->cursors == NULL) {
+			theme->cursor_count--;
+			free(cursor);
+		} else {
+			theme->cursors[theme->cursor_count - 1] = cursor;
+		}
+	}
+
+	XcursorImagesDestroy(images);
+}
+
+static int
+tizen_cursor_enabled(void)
+{
+	static int enabled = -1;
+	const char* tizen_cursor_env;
+
+	if (enabled == -1) {
+		if ((tizen_cursor_env = getenv("TIZEN_CURSOR_ENABLE"))
+                                && (atoi(tizen_cursor_env) == 1))
+			enabled = 1;
+		else
+			enabled = 0;
+	}
+
+	return enabled;
+}
+
+
 /** Load a cursor theme to memory shared with the compositor
  *
  * \param name The name of the cursor theme to load. If %NULL, the default
@@ -407,10 +450,11 @@ wl_cursor_theme_load(const char *name, int size, struct wl_shm *shm)
 	if (!theme->pool)
 		goto out_error_pool;
 
-	xcursor_load_theme(name, size, load_callback, theme);
-
-	if (theme->cursor_count == 0)
-		load_default_theme(theme);
+	if (!tizen_cursor_enabled()) {
+		xcursor_load_theme(name, size, load_callback, theme);
+		if (theme->cursor_count == 0)
+			load_default_theme(theme);
+	}
 
 	return theme;
 
@@ -452,10 +496,23 @@ wl_cursor_theme_get_cursor(struct wl_cursor_theme *theme,
 			   const char *name)
 {
 	unsigned int i;
+	unsigned int init_cursor_count;
+
+	if(!theme || !name)
+		return NULL;
 
 	for (i = 0; i < theme->cursor_count; i++) {
 		if (strcmp(name, theme->cursors[i]->name) == 0)
 			return theme->cursors[i];
+	}
+
+	if (tizen_cursor_enabled()) {
+		init_cursor_count = theme->cursor_count;
+		xcursor_load_theme_cursor_name(theme->name, theme->size,
+                        load_callback_ondemand_loader, theme, name);
+
+		if (theme->cursor_count > init_cursor_count)
+			return theme->cursors[theme->cursor_count-1];
 	}
 
 	return NULL;
