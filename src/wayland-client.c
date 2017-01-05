@@ -737,6 +737,57 @@ wl_proxy_marshal_array_constructor(struct wl_proxy *proxy,
 							    proxy->version);
 }
 
+// TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+/** Print the client_entries of the wl_map
+ * \param map  Pointer to wl_map.
+ */
+static void
+print_map_client_enteries(struct wl_map *map)
+{
+	struct wl_proxy *proxy = NULL;
+	char data[4096] = {'\0'};
+	char *str_ptr = data;
+	int length = sizeof(data), id = 0, count = 0;
+	int *len = &length;
+
+	count = wl_map_client_entries_count(map);
+	if(count <= 0)
+		return;
+
+	WL_SNPRINTF(str_ptr, len, "Map Client Entries:\n"
+				" [Interface Name, ID]\n");
+	for (id = 0; id < count; id++) {
+		proxy = wl_map_lookup(map, id);
+		if (proxy && !wl_object_is_zombie(map, id)) {
+			WL_SNPRINTF(str_ptr, len, "[%-15s, %-3d]\n",
+				proxy->object.interface->name, id);
+
+			/* If the current data to be printed exceeds
+			 * 4096 bytes, print it and start to fill
+			 * from the beginning
+			 */
+			if(length <= 0) {
+#ifdef HAVE_DLOG
+				wl_dlog("%s", data);
+#else
+				fprintf(stderr, "[%s][%d][Pid: %d] %s",
+					__FILE__, __LINE__, (int)getpid(), data);
+#endif
+				length = sizeof(data);
+				memset(data, '\0', length);
+				str_ptr = data;
+				id--;
+			}
+		}
+	}
+#ifdef HAVE_DLOG
+	wl_dlog("\n%s", data);
+#else
+	fprintf(stderr, "[%s][%d][Pid: %d] \n%s",
+		__FILE__, __LINE__, (int)getpid(), data);
+#endif
+}
+// TIZEN_ONLY : END
 
 /** Prepare a request to be sent to the compositor
  *
@@ -791,8 +842,17 @@ wl_proxy_marshal_array_constructor_versioned(struct wl_proxy *proxy,
 	if (debug_client)
 		wl_closure_print(closure, &proxy->object, true);
 
-	if (wl_closure_send(closure, proxy->display->connection))
-		wl_abort("Error sending request: %s\n", strerror(errno));
+    if (wl_closure_send(closure, proxy->display->connection))
+      // TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+      {
+         if (errno == EAGAIN) {
+              wl_closure_print(closure, &proxy->object, true);
+              wl_print_connection_data(proxy->display->connection, OUT);
+              print_map_client_enteries(&(proxy->display->objects));
+         }
+         wl_abort("Error sending request: %s\n", strerror(errno));
+      }
+    // TIZEN_ONLY : END
 
 	wl_closure_destroy(closure);
 
@@ -1063,6 +1123,9 @@ connect_to_socket(const char *name)
 	size = offsetof (struct sockaddr_un, sun_path) + name_size;
 
 	if (connect(fd, (struct sockaddr *) &addr, size) < 0) {
+		// TIZEN_ONLY(20170410): Debug logs to identify the failure cause of wl_display_connect()
+		wl_log("connect() failed: fd(%d) errno(%d, %m)\n", fd, errno);
+		// END
 		close(fd);
 		return -1;
 	}
@@ -1097,6 +1160,10 @@ wl_display_connect_to_fd(int fd)
 
 	display = zalloc(sizeof *display);
 	if (display == NULL) {
+		// TIZEN_ONLY(20170410): Debbug logs to identify the failure cause of wl_display_connect()
+		wl_log("no memory\n");
+		errno = ENOMEM;
+		// END
 		close(fd);
 		return NULL;
 	}
@@ -1158,6 +1225,9 @@ wl_display_connect_to_fd(int fd)
 	return display;
 
  err_connection:
+	// TIZEN_ONLY(20170410): Debug logs to identify the failure cause of wl_display_connect()
+	wl_log("%s() failed\n", __func__);
+	// END
 	pthread_mutex_unlock(&display->mutex);
 	pthread_mutex_destroy(&display->mutex);
 	pthread_cond_destroy(&display->reader_cond);

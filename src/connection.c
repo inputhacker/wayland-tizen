@@ -317,6 +317,95 @@ decode_cmsg(struct wl_buffer *buffer, struct msghdr *msg)
 	return 0;
 }
 
+// TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+/** Get the sender id, opcode, and size of the message in
+ *  a connection buffer
+ *
+ * \param buf    Connection buffer (in/out)
+ * \param rem    Remaining bytes in the connection buffer
+ * \param id     Pointer to sender id
+ * \param opcode Pointer to opcode
+ */
+static int
+get_msg_info(struct wl_buffer *buf, int rem, int* id, int* opcode)
+{
+	uint32_t p[2] = {0};
+	int size = 0;
+
+	wl_buffer_copy(buf, p, sizeof p);
+	*id = p[0];
+	*opcode = p[1] & 0xffff;
+	size = p[1] >> 16;
+	if (rem < size)
+		return 0;
+
+	buf->tail += size;
+	return size;
+}
+
+/** Print the contents of the connection buffer (in/out)
+ *
+ * \param connection  Pointer to wl_connection
+ * \param type        Type of connection buffer i.e. in or out
+ */
+void
+wl_print_connection_data(struct wl_connection *connection, enum wl_buffer_type type)
+{
+	char data[MAX_BUFFER_SIZE] = {'\0'};
+	char* str_ptr = data;
+	int length = sizeof(data), id = 0, opcode = 0, size = 0;
+	int rem = 0, total = 0;
+	int* len = &length;
+	struct wl_buffer *buf = NULL;
+	const char* str_type = NULL;
+
+	if(type == IN) {
+		buf = &connection->in;
+		str_type = "in";
+	}
+	else {
+		buf = &connection->out;
+		str_type = "out";
+	}
+	total = wl_buffer_size(buf);
+
+	WL_SNPRINTF(str_ptr, len, "Printing connection-%s buffer:\n"
+				"[sender_id , opcode, msg_size]\n", str_type);
+	for (rem = total; rem >= 8; rem -= size) {
+		size = get_msg_info(buf, rem, &id, &opcode);
+		if(0 == size) {
+			break;
+		}
+		WL_SNPRINTF(str_ptr, len, "%s: [%-3d, %-3d, %-3d]\n",
+					str_type, id, opcode, size);
+
+		/* If the current data to be printed exceeds
+		 * MAX_BUFFER_SIZE bytes, print it and start to fill
+		 * from the beginning
+		 */
+		if(length <= 0) {
+#ifdef HAVE_DLOG
+			wl_dlog("%s", data);
+#else
+			fprintf(stderr, "[%s][%d][Pid: %d] %s",
+					__FILE__, __LINE__, (int)getpid(), data);
+#endif
+			str_ptr = data;
+			length = sizeof(data);
+			WL_SNPRINTF(str_ptr, len, "%s: [%-3d, %-3d, %-3d]\n",
+					str_type, id, opcode, size);
+		}
+	}
+
+#ifdef HAVE_DLOG
+	wl_dlog("\n%s", data);
+#else
+	fprintf(stderr, "[%s][%d][Pid: %d] \n%s",
+			__FILE__, __LINE__, (int)getpid(), data);
+#endif
+}
+// TIZEN_ONLY : END
+
 int
 wl_connection_flush(struct wl_connection *connection)
 {
