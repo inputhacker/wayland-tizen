@@ -322,6 +322,24 @@ wl_map_remove(struct wl_map *map, uint32_t i)
 	map->free_list = (i << 1) | 1;
 }
 
+// TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+int
+wl_map_client_entries_count(struct wl_map *map)
+{
+	struct wl_array* entries = NULL;
+	union map_entry* start = NULL;
+	uint32_t count = 0;
+
+	if(NULL == map)
+		return -1;
+
+	entries = &(map->client_entries);
+	start = entries->data;
+	count = entries->size / sizeof (*start);
+	return count;
+}
+// END
+
 void *
 wl_map_lookup(struct wl_map *map, uint32_t i)
 {

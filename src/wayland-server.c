@@ -243,7 +243,19 @@ wl_resource_post_event(struct wl_resource *resource, uint32_t opcode, ...)
 {
 	union wl_argument args[WL_CLOSURE_MAX_ARGS];
 	struct wl_object *object = &resource->object;
+	const struct wl_message *message;
+	int since, version;
 	va_list ap;
+
+	message = &object->interface->events[opcode];
+	since = wl_message_get_since(message);
+	version = wl_resource_get_version (resource);
+
+	if (version < since)
+	{
+		wl_log("Invalid event since (%d < %d). Opcode: %d Event: %s Interface: %s \n",
+			version, since, opcode, message->name, object->interface->name);
+	}
 
 	va_start(ap, opcode);
 	wl_argument_from_va_list(object->interface->events[opcode].signature,
@@ -282,11 +294,15 @@ wl_resource_post_error(struct wl_resource *resource,
 {
 	struct wl_client *client = resource->client;
 	char buffer[128];
+	int pid;
 	va_list ap;
 
 	va_start(ap, msg);
 	vsnprintf(buffer, sizeof buffer, msg, ap);
 	va_end(ap);
+
+	wl_client_get_credentials(client, &pid, NULL, NULL);
+	wl_log("Wayland_Client_Error: From ProcessID:%d, Error Message:[%s]\n", pid, buffer);
 
 	/*
 	 * When a client aborts, its resources are destroyed in id order,
@@ -323,8 +339,11 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	uint32_t resource_flags;
 	int opcode, size, since;
 	int len;
+	int pid;
 
 	if (mask & WL_EVENT_HANGUP) {
+		wl_log("Mask has hangup flag set, client_proc(%s) PID(%d) mask[%x]\n",
+			   client->proc_name, client->ucred.pid, mask);
 		wl_client_destroy(client);
 		return 1;
 	}
@@ -336,9 +355,9 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 
 	if (mask & WL_EVENT_WRITABLE) {
 		len = wl_connection_flush(connection);
-		if (len < 0 && errno != EAGAIN && errno != EPIPE)
-			wl_log("client_proc(%s) flush failed: len(%d) errno(%d)\n",
-				   client->proc_name, len, errno);
+		if (len < 0)
+			wl_log("client_proc(%s) PID(%d) flush failed: len(%d) errno(%d)\n",
+				   client->proc_name, client->ucred.pid, len, errno);
 		if (len < 0 && errno != EAGAIN) {
 			destroy_client_with_error(
 			    client, "failed to flush client connection");
@@ -352,9 +371,9 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	len = 0;
 	if (mask & WL_EVENT_READABLE) {
 		len = wl_connection_read(connection);
-		if (len < 0 && errno != EAGAIN && errno != EPIPE)
-			wl_log("client_proc(%s) read failed: len(%d) errno(%d)",
-				   client->proc_name, len, errno);
+		if (len <= 0)
+			wl_log("client_proc(%s) PID(%d) read failed: len(%d) errno(%d)\n",
+				   client->proc_name, client->ucred.pid, len, errno);
 		if (len == 0 || (len < 0 && errno != EAGAIN)) {
 			destroy_client_with_error(
 			    client, "failed to read client connection");
@@ -442,6 +461,8 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	}
 
 	if (client->error) {
+		wl_client_get_credentials(client, &pid, NULL, NULL);
+		wl_log("Wayland_Client_Error: Client Destroyed with ProcessID:[%d]\n", pid);
 		destroy_client_with_error(client,
 					  "error in client communication");
 	}
@@ -1339,9 +1360,9 @@ wl_display_flush_clients(struct wl_display *display)
 
 	wl_list_for_each_safe(client, next, &display->client_list, link) {
 		ret = wl_connection_flush(client->connection);
-		if (ret < 0 && errno != EAGAIN && errno != EPIPE)
-			wl_log("client_proc(%s) flush failed: ret(%d) errno(%d)\n",
-				   client->proc_name, ret, errno);
+		if (ret < 0)
+			wl_log("client_proc(%s) PID(%d) flush failed: ret(%d) errno(%d)\n",
+				   client->proc_name, client->ucred.pid, ret, errno);
 		if (ret < 0 && errno == EAGAIN) {
 			wl_event_source_fd_update(client->source,
 						  WL_EVENT_WRITABLE |
@@ -1404,8 +1425,10 @@ socket_data(int fd, uint32_t mask, void *data)
 	if (client_fd < 0)
 		wl_log("failed to accept: %m\n");
 	else
-		if (!wl_client_create(display, client_fd))
+		if (!wl_client_create(display, client_fd)) {
+			wl_log("failed to create client: %m\n");
 			close(client_fd);
+		}
 
 	return 1;
 }
