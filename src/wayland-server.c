@@ -257,11 +257,15 @@ wl_resource_post_error(struct wl_resource *resource,
 {
 	struct wl_client *client = resource->client;
 	char buffer[128];
+	int pid;
 	va_list ap;
 
 	va_start(ap, msg);
 	vsnprintf(buffer, sizeof buffer, msg, ap);
 	va_end(ap);
+
+	wl_client_get_credentials(client, &pid, NULL, NULL);
+	wl_log("Wayland_Client_Error: From ProcessID:%d, Error Message:[%s]\n", pid, buffer);
 
 	client->error = 1;
 
@@ -292,6 +296,7 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	uint32_t resource_flags;
 	int opcode, size, since;
 	int len;
+	int pid;
 
 	if (mask & (WL_EVENT_ERROR | WL_EVENT_HANGUP)) {
 		wl_client_destroy(client);
@@ -397,8 +402,11 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 		len = wl_connection_pending_input(connection);
 	}
 
-	if (client->error)
+	if (client->error) {
+		wl_client_get_credentials(client, &pid, NULL, NULL);
+		wl_log("Wayland_Client_Error: Client Destroyed with ProcessID:[%d]\n", pid);
 		wl_client_destroy(client);
+	}
 
 	return 1;
 }
