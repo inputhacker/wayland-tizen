@@ -348,7 +348,9 @@ wl_display_create_queue(struct wl_display *display)
 	if (queue == NULL)
 		return NULL;
 
+	pthread_mutex_lock(&display->mutex);
 	wl_event_queue_init(queue, display);
+	pthread_mutex_unlock(&display->mutex);
 
 	return queue;
 }
@@ -559,16 +561,22 @@ WL_EXPORT int
 wl_proxy_add_listener(struct wl_proxy *proxy,
 		      void (**implementation)(void), void *data)
 {
+	struct wl_display *display = proxy->display;
+
 	if (proxy->flags & WL_PROXY_FLAG_WRAPPER)
 		wl_abort("Proxy %p is a wrapper\n", proxy);
 
+	pthread_mutex_lock(&display->mutex);
 	if (proxy->object.implementation || proxy->dispatcher) {
 		wl_log("proxy %p already has listener\n", proxy);
+		pthread_mutex_unlock(&display->mutex);
 		return -1;
 	}
 
 	proxy->object.implementation = implementation;
 	proxy->user_data = data;
+
+	pthread_mutex_unlock(&display->mutex);
 
 	return 0;
 }
@@ -589,7 +597,14 @@ wl_proxy_add_listener(struct wl_proxy *proxy,
 WL_EXPORT const void *
 wl_proxy_get_listener(struct wl_proxy *proxy)
 {
-	return proxy->object.implementation;
+	struct wl_display *display = proxy->display;
+	const void *listener;
+
+	pthread_mutex_lock(&display->mutex);
+	listener = proxy->object.implementation;
+	pthread_mutex_unlock(&display->mutex);
+
+	return listener;
 }
 
 /** Set a proxy's listener (with dispatcher)
@@ -617,17 +632,24 @@ wl_proxy_add_dispatcher(struct wl_proxy *proxy,
 			wl_dispatcher_func_t dispatcher,
 			const void *implementation, void *data)
 {
+	struct wl_display *display = proxy->display;
+
 	if (proxy->flags & WL_PROXY_FLAG_WRAPPER)
 		wl_abort("Proxy %p is a wrapper\n", proxy);
 
+	pthread_mutex_lock(&display->mutex);
+
 	if (proxy->object.implementation || proxy->dispatcher) {
 		wl_log("proxy %p already has listener\n", proxy);
+		pthread_mutex_unlock(&display->mutex);
 		return -1;
 	}
 
 	proxy->object.implementation = implementation;
 	proxy->dispatcher = dispatcher;
 	proxy->user_data = data;
+
+	pthread_mutex_unlock(&display->mutex);
 
 	return 0;
 }
@@ -1046,6 +1068,7 @@ wl_display_connect_to_fd(int fd)
 	wl_event_queue_init(&display->default_queue, display);
 	wl_event_queue_init(&display->display_queue, display);
 	pthread_mutex_init(&display->mutex, NULL);
+	pthread_mutex_lock(&display->mutex);
 	pthread_cond_init(&display->reader_cond, NULL);
 	display->reader_count = 0;
 
@@ -1084,9 +1107,12 @@ wl_display_connect_to_fd(int fd)
 	if (display->connection == NULL)
 		goto err_connection;
 
+	pthread_mutex_unlock(&display->mutex);
+
 	return display;
 
  err_connection:
+	pthread_mutex_unlock(&display->mutex);
 	pthread_mutex_destroy(&display->mutex);
 	pthread_cond_destroy(&display->reader_cond);
 	wl_map_release(&display->objects);
@@ -1157,11 +1183,14 @@ wl_display_connect(const char *name)
 WL_EXPORT void
 wl_display_disconnect(struct wl_display *display)
 {
+	pthread_mutex_lock(&display->mutex);
+
 	wl_connection_destroy(display->connection);
 	wl_map_for_each(&display->objects, free_zombies, NULL);
 	wl_map_release(&display->objects);
 	wl_event_queue_release(&display->default_queue);
 	wl_event_queue_release(&display->display_queue);
+	pthread_mutex_unlock(&display->mutex);
 	pthread_mutex_destroy(&display->mutex);
 	pthread_cond_destroy(&display->reader_cond);
 	close(display->fd);
@@ -2011,7 +2040,11 @@ wl_display_flush(struct wl_display *display)
 WL_EXPORT void
 wl_proxy_set_user_data(struct wl_proxy *proxy, void *user_data)
 {
+	struct wl_display *display = proxy->display;
+
+	pthread_mutex_lock(&display->mutex);
 	proxy->user_data = user_data;
+	pthread_mutex_unlock(&display->mutex);
 }
 
 /** Get the user data associated with a proxy
@@ -2024,7 +2057,14 @@ wl_proxy_set_user_data(struct wl_proxy *proxy, void *user_data)
 WL_EXPORT void *
 wl_proxy_get_user_data(struct wl_proxy *proxy)
 {
-	return proxy->user_data;
+	struct wl_display *display = proxy->display;
+	void *user_data;
+
+	pthread_mutex_lock(&display->mutex);
+	user_data = proxy->user_data;
+	pthread_mutex_unlock(&display->mutex);
+
+	return user_data;
 }
 
 /** Get the protocol object version of a proxy object
@@ -2046,7 +2086,14 @@ wl_proxy_get_user_data(struct wl_proxy *proxy)
 WL_EXPORT uint32_t
 wl_proxy_get_version(struct wl_proxy *proxy)
 {
-	return proxy->version;
+	struct wl_display *display = proxy->display;
+	uint32_t version;
+
+	pthread_mutex_lock(&display->mutex);
+	version = proxy->version;
+	pthread_mutex_unlock(&display->mutex);
+
+	return version;
 }
 
 /** Get the id of a proxy object
@@ -2059,7 +2106,14 @@ wl_proxy_get_version(struct wl_proxy *proxy)
 WL_EXPORT uint32_t
 wl_proxy_get_id(struct wl_proxy *proxy)
 {
-	return proxy->object.id;
+	struct wl_display *display = proxy->display;
+	uint32_t id;
+
+	pthread_mutex_lock(&display->mutex);
+	id = proxy->object.id;
+	pthread_mutex_unlock(&display->mutex);
+
+	return id;
 }
 
 /** Get the interface name (class) of a proxy object
@@ -2072,7 +2126,14 @@ wl_proxy_get_id(struct wl_proxy *proxy)
 WL_EXPORT const char *
 wl_proxy_get_class(struct wl_proxy *proxy)
 {
-	return proxy->object.interface->name;
+	struct wl_display *display = proxy->display;
+	const char *name;
+
+	pthread_mutex_lock(&display->mutex);
+	name = proxy->object.interface->name;
+	pthread_mutex_unlock(&display->mutex);
+
+	return name;
 }
 
 /** Assign a proxy to an event queue
@@ -2093,10 +2154,14 @@ wl_proxy_get_class(struct wl_proxy *proxy)
 WL_EXPORT void
 wl_proxy_set_queue(struct wl_proxy *proxy, struct wl_event_queue *queue)
 {
+	struct wl_display *display = proxy->display;
+
+	pthread_mutex_lock(&display->mutex);
 	if (queue)
 		proxy->queue = queue;
 	else
 		proxy->queue = &proxy->display->default_queue;
+	pthread_mutex_unlock(&display->mutex);
 }
 
 /** Create a proxy wrapper for making queue assignments thread-safe
@@ -2181,6 +2246,7 @@ WL_EXPORT void
 wl_proxy_wrapper_destroy(void *proxy_wrapper)
 {
 	struct wl_proxy *wrapper = proxy_wrapper;
+	struct wl_display *display = wrapper->display;
 
 	if (!(wrapper->flags & WL_PROXY_FLAG_WRAPPER))
 		wl_abort("Tried to destroy non-wrapper proxy with "
@@ -2188,7 +2254,10 @@ wl_proxy_wrapper_destroy(void *proxy_wrapper)
 
 	assert(wrapper->refcount == 1);
 
+	pthread_mutex_lock(&display->mutex);
+	wrapper->flags |= WL_PROXY_FLAG_DESTROYED;
 	free(wrapper);
+	pthread_mutex_unlock(&display->mutex);
 }
 
 WL_EXPORT void
