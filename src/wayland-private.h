@@ -28,6 +28,8 @@
 #ifndef WAYLAND_PRIVATE_H
 #define WAYLAND_PRIVATE_H
 
+#include "../config.h"
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -50,6 +52,15 @@
 #define WL_MAP_CLIENT_SIDE 1
 #define WL_SERVER_ID_START 0xff000000
 #define WL_CLOSURE_MAX_ARGS 20
+
+#define WL_SNPRINTF(p, len, fmt, ARG...)  \
+	do { \
+		if (p && len && *len > 0) { \
+			int s = snprintf(p, *len, fmt, ##ARG); \
+			p += s; \
+			*len -= s; \
+		} \
+	} while (0)
 
 struct wl_object {
 	const struct wl_interface *interface;
@@ -232,6 +243,22 @@ wl_debug_client_enable(int enable);
 
 void
 wl_debug_server_enable(int enable);
+
+#ifdef HAVE_DLOG
+#include <sys/syscall.h>
+
+extern int debug_dlog;
+
+void _wl_dlog(const char *fmt, ...);
+
+#define wl_dlog(fmt, args...) \
+	do { \
+		if (debug_dlog) \
+			_wl_dlog(fmt, ##args); \
+		else \
+			_wl_dlog("[%d][%s %d]"fmt"\n", (int)syscall(SYS_gettid), __FUNCTION__, __LINE__, ##args); \
+	} while (0)
+#endif
 
 extern wl_log_func_t wl_log_handler;
 
