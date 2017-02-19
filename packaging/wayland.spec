@@ -14,6 +14,7 @@ BuildRequires:	autoconf >= 2.64, automake >= 1.11
 BuildRequires:	libtool >= 2.2
 BuildRequires:	pkgconfig
 BuildRequires:  pkgconfig(libffi)
+BuildRequires:  pkgconfig(dlog)
 BuildRequires:  expat-devel
 BuildRequires:  pkgconfig(libxml-2.0)
 

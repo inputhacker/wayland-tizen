@@ -26,6 +26,8 @@
 
 #define _GNU_SOURCE
 
+#include "../config.h"
+
 #include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -973,6 +975,12 @@ wl_display_connect_to_fd(int fd)
 	struct wl_display *display;
 	struct wl_thread_data *thread_data;
 	const char *debug;
+
+#ifdef HAVE_DLOG
+	debug = getenv("WAYLAND_DLOG");
+	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
+		debug_dlog = 1;
+#endif
 
 	debug = getenv("WAYLAND_DEBUG");
 	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
