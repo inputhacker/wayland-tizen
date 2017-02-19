@@ -24,6 +24,8 @@
  * SOFTWARE.
  */
 
+#include "../config.h"
+
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,6 +34,11 @@
 
 #include "wayland-util.h"
 #include "wayland-private.h"
+
+#ifdef HAVE_DLOG
+#include <dlog.h>
+#define WLLOG_TAG "WLLOG"
+#endif
 
 int debug_client = 0;
 int debug_server = 0;
@@ -402,6 +409,23 @@ wl_debug_server_enable(int enable)
 	debug_server = !!enable;
 }
 
+int debug_dlog;
+
+#ifdef HAVE_DLOG
+void
+_wl_dlog(const char *fmt, ...)
+{
+	va_list argp;
+
+	va_start(argp, fmt);
+	if (debug_dlog)
+		dlog_vprint(DLOG_ERROR, WLLOG_TAG, fmt, argp);
+	else
+		vfprintf(stderr, fmt, argp);
+	va_end(argp);
+}
+#endif
+
 static void
 wl_log_stderr_handler(const char *fmt, va_list arg)
 {
@@ -415,6 +439,12 @@ wl_log(const char *fmt, ...)
 {
 	va_list argp;
 
+#ifdef HAVE_DLOG
+	va_start(argp, fmt);
+	dlog_vprint(DLOG_ERROR, WLLOG_TAG, fmt, argp);
+	va_end(argp);
+#endif
+
 	va_start(argp, fmt);
 	wl_log_handler(fmt, argp);
 	va_end(argp);
@@ -424,6 +454,12 @@ void
 wl_abort(const char *fmt, ...)
 {
 	va_list argp;
+
+#ifdef HAVE_DLOG
+	va_start(argp, fmt);
+	dlog_vprint(DLOG_ERROR, WLLOG_TAG, fmt, argp);
+	va_end(argp);
+#endif
 
 	va_start(argp, fmt);
 	wl_log_handler(fmt, argp);

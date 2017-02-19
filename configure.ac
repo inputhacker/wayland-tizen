@@ -130,6 +130,11 @@ if test "x$enable_dtd_validation" = "xyes"; then
 	AC_CONFIG_LINKS([src/wayland.dtd.embed:protocol/wayland.dtd])
 fi
 
+PKG_CHECK_MODULES(DLOG, [dlog], [have_dlog="yes"], [have_dlog="no"])
+if test "x$have_dlog" = "xyes"; then
+    AC_DEFINE(HAVE_DLOG, 1, [dlog available])
+fi
+
 AC_PATH_PROG(XSLTPROC, xsltproc)
 AM_CONDITIONAL([HAVE_XSLTPROC], [test "x$XSLTPROC" != "x"])
 
