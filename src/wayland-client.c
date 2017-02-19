@@ -76,6 +76,7 @@ struct wl_global {
 struct wl_event_queue {
 	struct wl_list event_list;
 	struct wl_display *display;
+	struct wl_list link;
 };
 
 struct wl_thread_data {
@@ -117,6 +118,10 @@ struct wl_display {
 };
 
 /** \endcond */
+
+pthread_mutex_t queue_list_lock = PTHREAD_MUTEX_INITIALIZER;
+static int queue_list_inited;
+static struct wl_list queue_list;
 
 /**
  * This helper function wakes up all threads that are
@@ -222,6 +227,10 @@ display_protocol_error(struct wl_display *display, uint32_t code,
 static void
 wl_event_queue_init(struct wl_event_queue *queue, struct wl_display *display)
 {
+	pthread_mutex_lock(&queue_list_lock);
+	wl_list_insert(queue_list.prev, &queue->link);
+	pthread_mutex_unlock(&queue_list_lock);
+
 	wl_list_init(&queue->event_list);
 	queue->display = display;
 }
@@ -283,6 +292,10 @@ wl_event_queue_release(struct wl_event_queue *queue)
 
 		wl_closure_destroy(closure);
 	}
+
+	pthread_mutex_lock(&queue_list_lock);
+	wl_list_remove(&queue->link);
+	pthread_mutex_unlock(&queue_list_lock);
 }
 
 /** Destroy an event queue
@@ -964,6 +977,13 @@ wl_display_connect_to_fd(int fd)
 	debug = getenv("WAYLAND_DEBUG");
 	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
 		debug_client = 1;
+
+	pthread_mutex_lock(&queue_list_lock);
+	if (!queue_list_inited) {
+		wl_list_init(&queue_list);
+		queue_list_inited = 1;
+	}
+	pthread_mutex_unlock(&queue_list_lock);
 
 	display = zalloc(sizeof *display);
 	if (display == NULL) {
@@ -2095,8 +2115,27 @@ WL_EXPORT void
 wl_proxy_set_queue(struct wl_proxy *proxy, struct wl_event_queue *queue)
 {
 	struct wl_display *display = proxy->display;
+	struct wl_event_queue *eq;
 
 	pthread_mutex_lock(&display->mutex);
+
+	/* to check the event loss */
+	pthread_mutex_lock(&queue_list_lock);
+	wl_list_for_each(eq, &queue_list, link) {
+		struct wl_closure *closure;
+		if (eq == queue)
+			continue;
+		if (wl_list_empty(&eq->event_list))
+			continue;
+		wl_list_for_each(closure, &eq->event_list, link) {
+			if (proxy == closure->proxy)
+				wl_log("Need to dispatch events: %s@%u.%s\n",
+				       proxy->object.interface->name, proxy->object.id,
+				       closure->message->name);
+		}
+	}
+	pthread_mutex_unlock(&queue_list_lock);
+
 	if (queue)
 		proxy->queue = queue;
 	else
