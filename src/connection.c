@@ -46,8 +46,10 @@
 
 #define DIV_ROUNDUP(n, a) ( ((n) + ((a) - 1)) / (a) )
 
+#define MAX_BUFFER_SIZE	4096
+
 struct wl_buffer {
-	char data[4096];
+	char data[MAX_BUFFER_SIZE];
 	uint32_t head, tail;
 };
 
@@ -63,14 +65,17 @@ struct wl_connection {
 	int want_flush;
 };
 
+static uint32_t wl_buffer_size(struct wl_buffer *b);
+
 static int
 wl_buffer_put(struct wl_buffer *b, const void *data, size_t count)
 {
 	uint32_t head, size;
+	size_t max;
 
-	if (count > sizeof(b->data)) {
-		wl_log("Data too big for buffer (%d > %d).\n",
-		       count, sizeof(b->data));
+	max = sizeof(b->data) - wl_buffer_size(b);
+	if (count > max) {
+		wl_log("Data too big for buffer (%d > %d).\n", count, max);
 		errno = E2BIG;
 		return -1;
 	}
@@ -140,7 +145,14 @@ wl_buffer_get_iov(struct wl_buffer *b, struct iovec *iov, int *count)
 static void
 wl_buffer_copy(struct wl_buffer *b, void *data, size_t count)
 {
-	uint32_t tail, size;
+	uint32_t tail, size, buf_size;
+
+	buf_size = wl_buffer_size(b);
+	if (count > buf_size) {
+		wl_log("Count too big for buffer (%d > %d).\n", count, buf_size);
+		errno = E2BIG;
+		return;
+	}
 
 	tail = MASK(b->tail);
 	if (tail + count <= sizeof b->data) {
@@ -162,6 +174,12 @@ struct wl_connection *
 wl_connection_create(int fd)
 {
 	struct wl_connection *connection;
+
+	if (fd < 0) {
+		wl_log("invalid fd(%d)\n", fd);
+		errno = EINVAL;
+		return NULL;
+	}
 
 	connection = zalloc(sizeof *connection);
 	if (connection == NULL)
@@ -212,6 +230,13 @@ wl_connection_copy(struct wl_connection *connection, void *data, size_t size)
 void
 wl_connection_consume(struct wl_connection *connection, size_t size)
 {
+	uint32_t buf_size = wl_buffer_size(&connection->in);
+
+	if (size > buf_size) {
+		wl_log("Size is too big for connection (%d > %u)\n", size, buf_size);
+		return;
+	}
+
 	connection->in.tail += size;
 }
 
@@ -309,6 +334,11 @@ wl_connection_flush(struct wl_connection *connection)
 		connection->out.tail += len;
 	}
 
+	if (wl_buffer_size(&connection->out) != 0) {
+		wl_log("couldn't flush all data\n");
+		return -1;
+	}
+
 	connection->want_flush = 0;
 
 	return connection->out.head - tail;
@@ -327,11 +357,14 @@ wl_connection_read(struct wl_connection *connection)
 	struct msghdr msg;
 	char cmsg[CLEN];
 	int len, count, ret;
+	size_t max;
 
 	if (wl_buffer_size(&connection->in) >= sizeof(connection->in.data)) {
 		errno = EOVERFLOW;
 		return -1;
 	}
+
+	max = sizeof(connection->in.data) - wl_buffer_size(&connection->in);
 
 	wl_buffer_put_iov(&connection->in, iov, &count);
 
@@ -353,6 +386,14 @@ wl_connection_read(struct wl_connection *connection)
 	ret = decode_cmsg(&connection->fds_in, &msg);
 	if (ret)
 		return -1;
+
+	if (len == MAX_BUFFER_SIZE)
+		wl_log("too many events in display socket fd(%d)\n", connection->fd);
+
+	if (len > (int)max) {
+		wl_log("data overflow\n");
+		return -1;
+	}
 
 	connection->in.head += len;
 
@@ -412,15 +453,26 @@ wl_connection_get_fd(struct wl_connection *connection)
 }
 
 static int
-wl_connection_put_fd(struct wl_connection *connection, int32_t fd)
+wl_connection_put_fds(struct wl_connection *connection, int32_t *fds, int count)
 {
-	if (wl_buffer_size(&connection->fds_out) == MAX_FDS_OUT * sizeof fd) {
+	int i;
+
+	if (wl_buffer_size(&connection->fds_out) + count * sizeof fds[0] > MAX_FDS_OUT * sizeof fds[0]) {
 		connection->want_flush = 1;
-		if (wl_connection_flush(connection) < 0)
+		if (wl_connection_flush(connection) < 0) {
+			wl_log("wl_connection_flush failed\n");
 			return -1;
+		}
 	}
 
-	return wl_buffer_put(&connection->fds_out, &fd, sizeof fd);
+	for (i = 0; i < count; i++) {
+		if (wl_buffer_put(&connection->fds_out, fds + i, sizeof fds[0]) < 0) {
+			wl_log("wl_buffer_put failed\n");
+			return -1;
+		}
+	}
+
+	return 0;
 }
 
 const char *
@@ -965,7 +1017,8 @@ copy_fds_to_connection(struct wl_closure *closure,
 	uint32_t i, count;
 	struct argument_details arg;
 	const char *signature = message->signature;
-	int fd;
+	int fds[MAX_FDS_OUT];
+	int fd_count = 0;
 
 	count = arg_count_for_signature(signature);
 	for (i = 0; i < count; i++) {
@@ -973,13 +1026,22 @@ copy_fds_to_connection(struct wl_closure *closure,
 		if (arg.type != 'h')
 			continue;
 
-		fd = closure->args[i].h;
-		if (wl_connection_put_fd(connection, fd)) {
+		if (fd_count >= MAX_FDS_OUT) {
+			wl_log("request could not be marshaled: "
+			       "too many file descriptors");
+			return -1;
+		}
+
+		fds[fd_count] = closure->args[i].h;
+		fd_count++;
+	}
+
+	if (fd_count > 0)
+		if (wl_connection_put_fds(connection, fds, fd_count)) {
 			wl_log("request could not be marshaled: "
 			       "can't send file descriptor");
 			return -1;
 		}
-	}
 
 	return 0;
 }
