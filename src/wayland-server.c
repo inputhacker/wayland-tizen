@@ -927,6 +927,12 @@ wl_display_create(void)
 	struct wl_display *display;
 	const char *debug;
 
+#ifdef HAVE_DLOG
+	debug = getenv("WAYLAND_DLOG");
+	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
+		debug_dlog = 1;
+#endif
+
 	debug = getenv("WAYLAND_DEBUG");
 	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
 		debug_server = 1;

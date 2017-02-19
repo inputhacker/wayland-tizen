@@ -24,8 +24,8 @@ pkgconfig_DATA =
 
 bin_PROGRAMS = wayland-scanner
 wayland_scanner_SOURCES = src/scanner.c
-wayland_scanner_CFLAGS = $(EXPAT_CFLAGS) $(LIBXML_CFLAGS) $(AM_CFLAGS)
-wayland_scanner_LDADD = $(EXPAT_LIBS) $(LIBXML_LIBS) libwayland-util.la
+wayland_scanner_CFLAGS = $(EXPAT_CFLAGS) $(LIBXML_CFLAGS) $(DLOG_CFLAGS) $(AM_CFLAGS)
+wayland_scanner_LDADD = $(EXPAT_LIBS) $(LIBXML_LIBS) $(DLOG_LIBS) libwayland-util.la
 pkgconfig_DATA += src/wayland-scanner.pc
 
 if DTD_VALIDATION
@@ -40,7 +40,8 @@ $(BUILT_SOURCES) : wayland-scanner
 wayland_scanner = $(top_builddir)/wayland-scanner
 endif
 
-libwayland_util_la_CFLAGS = $(AM_CFLAGS)
+libwayland_util_la_CFLAGS = $(DLOG_CFLAGS) $(AM_CFLAGS)
+libwayland_util_la_LIBADD = $(DLOG_LIBS)
 libwayland_util_la_SOURCES =			\
 	src/wayland-util.c			\
 	src/wayland-util.h
@@ -51,7 +52,7 @@ if ENABLE_LIBRARIES
 noinst_LTLIBRARIES += libwayland-private.la
 lib_LTLIBRARIES = libwayland-server.la libwayland-client.la
 
-libwayland_private_la_CFLAGS = $(FFI_CFLAGS) $(AM_CFLAGS)
+libwayland_private_la_CFLAGS = $(FFI_CFLAGS) $(DLOG_CFLAGS) $(AM_CFLAGS)
 libwayland_private_la_SOURCES =			\
 	src/connection.c			\
 	src/wayland-os.c			\
@@ -72,8 +73,8 @@ nodist_include_HEADERS =			\
 	protocol/wayland-server-protocol.h	\
 	protocol/wayland-client-protocol.h
 
-libwayland_server_la_CFLAGS = $(FFI_CFLAGS) $(AM_CFLAGS) -pthread
-libwayland_server_la_LIBADD = $(FFI_LIBS) libwayland-private.la libwayland-util.la -lrt -lm
+libwayland_server_la_CFLAGS = $(FFI_CFLAGS) $(DLOG_CFLAGS) $(AM_CFLAGS) -pthread
+libwayland_server_la_LIBADD = $(FFI_LIBS) $(DLOG_LIBS) libwayland-private.la libwayland-util.la -lrt -lm
 libwayland_server_la_LDFLAGS = -version-info 1:0:1
 libwayland_server_la_SOURCES =			\
 	src/wayland-server.c			\
@@ -84,8 +85,8 @@ nodist_libwayland_server_la_SOURCES =		\
 	protocol/wayland-server-protocol.h	\
 	protocol/wayland-protocol.c
 
-libwayland_client_la_CFLAGS = $(FFI_CFLAGS) $(AM_CFLAGS) -pthread
-libwayland_client_la_LIBADD = $(FFI_LIBS) libwayland-private.la libwayland-util.la -lrt -lm
+libwayland_client_la_CFLAGS = $(FFI_CFLAGS) $(DLOG_CFLAGS) $(AM_CFLAGS) -pthread
+libwayland_client_la_LIBADD = $(FFI_LIBS) $(DLOG_LIBS) libwayland-private.la libwayland-util.la -lrt -lm
 libwayland_client_la_LDFLAGS = -version-info 3:0:3
 libwayland_client_la_SOURCES =			\
 	src/wayland-client.c
@@ -189,7 +190,7 @@ libtest_runner_la_LIBADD =			\
 	libwayland-util.la			\
 	libwayland-client.la			\
 	libwayland-server.la			\
-	-lrt -ldl $(FFI_LIBS)
+	-lrt -ldl $(FFI_LIBS) $(DLOG_LIBS)
 
 
 array_test_SOURCES = tests/array-test.c
