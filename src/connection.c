@@ -190,8 +190,11 @@ wl_connection_create(int fd)
 	}
 
 	connection = zalloc(sizeof *connection);
-	if (connection == NULL)
+	if (connection == NULL) {
+		wl_log("no memory\n");
+		errno = ENOMEM;
 		return NULL;
+	}
 
 	connection->fd = fd;
 
@@ -262,8 +265,10 @@ build_cmsg(struct wl_buffer *buffer, char *data, int *clen)
 	size_t size;
 
 	size = wl_buffer_size(buffer);
-	if (size > MAX_FDS_OUT * sizeof(int32_t))
+	if (size > MAX_FDS_OUT * sizeof(int32_t)) {
+		wl_log("too many fds (%lu)\n", size / sizeof(int32_t));
 		size = MAX_FDS_OUT * sizeof(int32_t);
+	}
 
 	if (size > 0) {
 		cmsg = (struct cmsghdr *) data;
@@ -298,11 +303,13 @@ decode_cmsg(struct wl_buffer *buffer, struct msghdr *msg)
 			for (i = 0; i < size; i++)
 				close(((int*)CMSG_DATA(cmsg))[i]);
 		} else if (wl_buffer_put(buffer, CMSG_DATA(cmsg), size) < 0) {
+				wl_log("wl_buffer_put failed\n");
 				return -1;
 		}
 	}
 
 	if (overflow) {
+		wl_log("cmsg overflow\n");
 		errno = EOVERFLOW;
 		return -1;
 	}
@@ -341,8 +348,11 @@ wl_connection_flush(struct wl_connection *connection)
 				      MSG_NOSIGNAL | MSG_DONTWAIT);
 		} while (len == -1 && errno == EINTR);
 
-		if (len == -1)
+		if (len == -1) {
+			if (errno != EAGAIN && errno != EPIPE)
+				wl_log("sendmsg failed. %m\n");
 			return -1;
+		}
 
 		close_fds(&connection->fds_out, MAX_FDS_OUT);
 
@@ -375,6 +385,7 @@ wl_connection_read(struct wl_connection *connection)
 	size_t max;
 
 	if (wl_buffer_size(&connection->in) >= sizeof(connection->in.data)) {
+		wl_log("buffer overflow\n");
 		errno = EOVERFLOW;
 		return -1;
 	}
@@ -395,8 +406,11 @@ wl_connection_read(struct wl_connection *connection)
 		len = wl_os_recvmsg_cloexec(connection->fd, &msg, MSG_DONTWAIT);
 	} while (len < 0 && errno == EINTR);
 
-	if (len <= 0)
+	if (len <= 0) {
+		if (errno != EAGAIN && errno != EPIPE)
+			wl_log("wl_os_recvmsg_cloexec failed. len(%d)\n", len);
 		return len;
+	}
 
 	ret = decode_cmsg(&connection->fds_in, &msg);
 	if (ret)
@@ -422,12 +436,16 @@ wl_connection_write(struct wl_connection *connection,
 	if (connection->out.head - connection->out.tail +
 	    count > ARRAY_LENGTH(connection->out.data)) {
 		connection->want_flush = 1;
-		if (wl_connection_flush(connection) < 0)
+		if (wl_connection_flush(connection) < 0) {
+			wl_log("wl_connection_flush failed\n");
 			return -1;
+		}
 	}
 
-	if (wl_buffer_put(&connection->out, data, count) < 0)
+	if (wl_buffer_put(&connection->out, data, count) < 0) {
+		wl_log("wl_buffer_put failed\n");
 		return -1;
+	}
 
 	connection->want_flush = 1;
 
@@ -438,14 +456,23 @@ int
 wl_connection_queue(struct wl_connection *connection,
 		    const void *data, size_t count)
 {
+	int ret;
+
 	if (connection->out.head - connection->out.tail +
 	    count > ARRAY_LENGTH(connection->out.data)) {
 		connection->want_flush = 1;
-		if (wl_connection_flush(connection) < 0)
+		if (wl_connection_flush(connection) < 0) {
+			wl_log("wl_connection_flush failed\n");
 			return -1;
+		}
 	}
 
-	return wl_buffer_put(&connection->out, data, count);
+	ret = wl_buffer_put(&connection->out, data, count);
+
+	if (ret < 0)
+		wl_log("wl_buffer_put failed\n");
+
+	return ret;
 }
 
 int
@@ -627,6 +654,7 @@ wl_closure_init(const struct wl_message *message, uint32_t size,
 	}
 
 	if (!closure) {
+		wl_log("no memory\n");
 		errno = ENOMEM;
 		return NULL;
 	}
@@ -757,6 +785,7 @@ wl_connection_demarshal(struct wl_connection *connection,
 
 	closure = wl_closure_init(message, size, &num_arrays, NULL);
 	if (closure == NULL) {
+		wl_log("closure init failed\n");
 		wl_connection_consume(connection, size);
 		return NULL;
 	}
@@ -1176,8 +1205,10 @@ serialize_closure(struct wl_closure *closure, uint32_t *buffer,
 	struct argument_details arg;
 	const char *signature;
 
-	if (buffer_count < 2)
+	if (buffer_count < 2) {
+		wl_log("buffer_count(%d) less than 2\n", buffer_count);
 		goto overflow;
+	}
 
 	p = buffer + 2;
 	end = buffer + buffer_count;
@@ -1252,6 +1283,7 @@ serialize_closure(struct wl_closure *closure, uint32_t *buffer,
 	return size;
 
 overflow:
+	wl_log("out of range\n");
 	errno = ERANGE;
 	return -1;
 }
@@ -1299,8 +1331,10 @@ wl_closure_send(struct wl_closure *closure, struct wl_connection *connection)
 
 	buffer_size = buffer_size_for_closure(closure);
 	buffer = zalloc(buffer_size * sizeof buffer[0]);
-	if (buffer == NULL)
+	if (buffer == NULL) {
+		wl_log("no memory\n");
 		return -1;
+	}
 
 	size = serialize_closure(closure, buffer, buffer_size);
 	if (size < 0) {
@@ -1327,8 +1361,10 @@ wl_closure_queue(struct wl_closure *closure, struct wl_connection *connection)
 
 	buffer_size = buffer_size_for_closure(closure);
 	buffer = malloc(buffer_size * sizeof buffer[0]);
-	if (buffer == NULL)
+	if (buffer == NULL) {
+		wl_log("no memory\n");
 		return -1;
+	}
 
 	size = serialize_closure(closure, buffer, buffer_size);
 	if (size < 0) {
@@ -1350,11 +1386,14 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send)
 	const char *signature = closure->message->signature;
 	struct timespec tp;
 	unsigned int time;
-
+	char temp[1024];
+	char *buf = temp;
+	int length = 1024;
+	int *len = &length;
 	clock_gettime(CLOCK_REALTIME, &tp);
 	time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
 
-	fprintf(stderr, "[%10.3f] %s%s@%u.%s(",
+	WL_SNPRINTF(buf, len, "[%d][%d][%10.3f] %s%s@%u.%s(", (int)getpid(), (int)syscall(SYS_gettid),
 		time / 1000.0,
 		send ? " -> " : "",
 		target->interface->name, target->id,
@@ -1363,53 +1402,57 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send)
 	for (i = 0; i < closure->count; i++) {
 		signature = get_next_argument(signature, &arg);
 		if (i > 0)
-			fprintf(stderr, ", ");
+			WL_SNPRINTF(buf, len, ", ");
 
 		switch (arg.type) {
 		case 'u':
-			fprintf(stderr, "%u", closure->args[i].u);
+			WL_SNPRINTF(buf, len, "%u", closure->args[i].u);
 			break;
 		case 'i':
-			fprintf(stderr, "%d", closure->args[i].i);
+			WL_SNPRINTF(buf, len, "%d", closure->args[i].i);
 			break;
 		case 'f':
-			fprintf(stderr, "%f",
+			WL_SNPRINTF(buf, len, "%f",
 				wl_fixed_to_double(closure->args[i].f));
 			break;
 		case 's':
 			if (closure->args[i].s)
-				fprintf(stderr, "\"%s\"", closure->args[i].s);
+				WL_SNPRINTF(buf, len, "\"%s\"", closure->args[i].s);
 			else
-				fprintf(stderr, "nil");
+				WL_SNPRINTF(buf, len, "nil");
 			break;
 		case 'o':
 			if (closure->args[i].o)
-				fprintf(stderr, "%s@%u",
+				WL_SNPRINTF(buf, len, "%s@%u",
 					closure->args[i].o->interface->name,
 					closure->args[i].o->id);
 			else
-				fprintf(stderr, "nil");
+				WL_SNPRINTF(buf, len, "nil");
 			break;
 		case 'n':
-			fprintf(stderr, "new id %s@",
+			WL_SNPRINTF(buf, len, "new id %s@",
 				(closure->message->types[i]) ?
 				 closure->message->types[i]->name :
 				  "[unknown]");
 			if (closure->args[i].n != 0)
-				fprintf(stderr, "%u", closure->args[i].n);
+				WL_SNPRINTF(buf, len, "%u", closure->args[i].n);
 			else
-				fprintf(stderr, "nil");
+				WL_SNPRINTF(buf, len, "nil");
 			break;
 		case 'a':
-			fprintf(stderr, "array");
+			WL_SNPRINTF(buf, len, "array");
 			break;
 		case 'h':
-			fprintf(stderr, "fd %d", closure->args[i].h);
+			WL_SNPRINTF(buf, len, "fd %d", closure->args[i].h);
 			break;
 		}
 	}
 
-	fprintf(stderr, ")\n");
+#ifdef HAVE_DLOG
+	wl_dlog("%s)", temp);
+#else
+	fprintf(stderr, "%s)\n", temp);
+#endif
 }
 
 static int

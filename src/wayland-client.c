@@ -26,6 +26,8 @@
 
 #define _GNU_SOURCE
 
+#include "../config.h"
+
 #include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -46,6 +48,8 @@
 #include "wayland-os.h"
 #include "wayland-client.h"
 #include "wayland-private.h"
+
+//#define WL_DEBUG_QUEUE
 
 /** \cond */
 
@@ -96,6 +100,7 @@ struct wl_display {
 		 * that the proxy is still valid. It's up to client how it will
 		 * use it */
 		uint32_t id;
+		char message[512];
 	} protocol_error;
 	int fd;
 	struct wl_map objects;
@@ -149,7 +154,16 @@ display_fatal_error(struct wl_display *display, int error)
 
 	display->last_error = error;
 
+	wl_log("got fatal error: %d\n", error);
+
 	display_wakeup_threads(display);
+}
+
+static void
+display_print_protocol_error_information(struct wl_display *display, int error)
+{
+	if (error == EINVAL || error == ENOMEM || error == EFAULT || error == EPROTO)
+		wl_log("error(%d) %s", error, display->protocol_error.message);
 }
 
 /**
@@ -323,6 +337,10 @@ wl_event_queue_destroy(struct wl_event_queue *queue)
 
 	pthread_mutex_lock(&display->mutex);
 	wl_event_queue_release(queue);
+#ifdef WL_DEBUG_QUEUE
+	if (debug_client)
+		wl_dlog("queue(%p) destroyed", queue);
+#endif
 	free(queue);
 	pthread_mutex_unlock(&display->mutex);
 }
@@ -343,6 +361,11 @@ wl_display_create_queue(struct wl_display *display)
 	queue = malloc(sizeof *queue);
 	if (queue == NULL)
 		return NULL;
+
+#ifdef WL_DEBUG_QUEUE
+	if (debug_client)
+		wl_dlog("display(%p) queue(%p) created", display, queue);
+#endif
 
 	pthread_mutex_lock(&display->mutex);
 	wl_event_queue_init(queue, display);
@@ -564,7 +587,8 @@ wl_proxy_add_listener(struct wl_proxy *proxy,
 
 	pthread_mutex_lock(&display->mutex);
 	if (proxy->object.implementation || proxy->dispatcher) {
-		wl_log("proxy %p already has listener\n", proxy);
+		wl_log("proxy %s@%u already has listener\n",
+		       proxy->object.interface->name, proxy->object.id);
 		pthread_mutex_unlock(&display->mutex);
 		return -1;
 	}
@@ -636,7 +660,8 @@ wl_proxy_add_dispatcher(struct wl_proxy *proxy,
 	pthread_mutex_lock(&display->mutex);
 
 	if (proxy->object.implementation || proxy->dispatcher) {
-		wl_log("proxy %p already has listener\n", proxy);
+		wl_log("proxy %s@%u already has listener\n",
+		       proxy->object.interface->name, proxy->object.id);
 		pthread_mutex_unlock(&display->mutex);
 		return -1;
 	}
@@ -925,12 +950,25 @@ display_handle_error(void *data,
 
 		object_id = proxy->object.id;
 		interface = proxy->object.interface;
+
+		pthread_mutex_lock(&display->mutex);
+		if (!display->last_error)
+			snprintf(display->protocol_error.message, 512, "%s@%u: error %d: %s\n",
+			         proxy->object.interface->name, proxy->object.id, code, message);
+		pthread_mutex_unlock(&display->mutex);
+
 	} else {
 		wl_log("[destroyed object]: error %d: %s\n",
 		       code, message);
 
 		object_id = 0;
 		interface = NULL;
+
+		pthread_mutex_lock(&display->mutex);
+		if (!display->last_error)
+			snprintf(display->protocol_error.message, 512,
+			         "[destroyed object]: error %d: %s\n", code, message);
+		pthread_mutex_unlock(&display->mutex);
 	}
 
 	display_protocol_error(display, code, object_id, interface);
@@ -1049,6 +1087,10 @@ wl_display_connect_to_fd(int fd)
 	struct wl_display *display;
 	const char *debug;
 
+	debug = getenv("WAYLAND_DLOG");
+	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
+		debug_dlog = 1;
+
 	debug = getenv("WAYLAND_DEBUG");
 	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
 		debug_client = 1;
@@ -1080,6 +1122,8 @@ wl_display_connect_to_fd(int fd)
 	display->proxy.flags = 0;
 	display->proxy.refcount = 1;
 
+	display->protocol_error.message[0] = '\0';
+
 	/* We set this version to 0 for backwards compatibility.
 	 *
 	 * If a client is using old versions of protocol headers,
@@ -1102,6 +1146,12 @@ wl_display_connect_to_fd(int fd)
 	display->connection = wl_connection_create(display->fd);
 	if (display->connection == NULL)
 		goto err_connection;
+
+#ifdef WL_DEBUG_QUEUE
+	if (debug_client)
+		wl_dlog("display(%p) default_queue(%p) display_queue(%p) fd(%d)",
+		        display, &display->default_queue, &display->display_queue, display->fd);
+#endif
 
 	pthread_mutex_unlock(&display->mutex);
 
@@ -1190,6 +1240,11 @@ wl_display_disconnect(struct wl_display *display)
 	pthread_mutex_destroy(&display->mutex);
 	pthread_cond_destroy(&display->reader_cond);
 	close(display->fd);
+
+#ifdef WL_DEBUG_QUEUE
+	if (debug_client)
+		wl_dlog("display(%p) disconnected", display);
+#endif
 
 	free(display);
 }
@@ -1393,15 +1448,19 @@ queue_event(struct wl_display *display, int len)
 	message = &proxy->object.interface->events[opcode];
 	closure = wl_connection_demarshal(display->connection, size,
 					  &display->objects, message);
-	if (!closure)
+	if (!closure) {
+		wl_log("wl_connection_demarshal failed\n");
 		return -1;
+	}
 
 	if (create_proxies(proxy, closure) < 0) {
+		wl_log("create_proxies failed\n");
 		wl_closure_destroy(closure);
 		return -1;
 	}
 
 	if (wl_closure_lookup_objects(closure, &display->objects) != 0) {
+		wl_log("wl_closure_lookup_objects failed\n");
 		wl_closure_destroy(closure);
 		return -1;
 	}
@@ -1413,6 +1472,13 @@ queue_event(struct wl_display *display, int len)
 		queue = &display->display_queue;
 	else
 		queue = proxy->queue;
+
+#ifdef WL_DEBUG_QUEUE
+	if (debug_client) {
+		wl_dlog("display_q(%p) default_q(%p) queue(%p) add event", &display->display_queue, &display->default_queue, queue);
+		wl_closure_print(closure, &proxy->object, false);
+	}
+#endif
 
 	wl_list_insert(queue->event_list.prev, &closure->link);
 
@@ -1472,6 +1538,8 @@ read_events(struct wl_display *display)
 	display->reader_count--;
 	if (display->reader_count == 0) {
 		total = wl_connection_read(display->connection);
+		if (total < 0 && errno != EAGAIN && errno != EPIPE)
+			wl_log("read failed: total(%d) errno(%d)", total, errno);
 		if (total == -1) {
 			if (errno == EAGAIN) {
 				/* we must wake up threads whenever
@@ -1481,6 +1549,7 @@ read_events(struct wl_display *display)
 				return 0;
 			}
 
+			wl_log("errno(%d)\n", errno);
 			display_fatal_error(display, errno);
 			return -1;
 		} else if (total == 0) {
@@ -1489,12 +1558,14 @@ read_events(struct wl_display *display)
 			 * an errno */
 			errno = EPIPE;
 			display_fatal_error(display, errno);
+			wl_log("pipe error\n");
 			return -1;
 		}
 
 		for (rem = total; rem >= 8; rem -= size) {
 			size = queue_event(display, rem);
 			if (size == -1) {
+				wl_log("queue_event failed\n");
 				display_fatal_error(display, errno);
 				return -1;
 			} else if (size == 0) {
@@ -1569,6 +1640,8 @@ wl_display_read_events(struct wl_display *display)
 	pthread_mutex_lock(&display->mutex);
 
 	if (display->last_error) {
+		wl_log("last_error(%d)\n", display->last_error);
+		display_print_protocol_error_information(display, display->last_error);
 		cancel_read(display);
 		pthread_mutex_unlock(&display->mutex);
 
@@ -1799,6 +1872,7 @@ wl_display_dispatch_queue(struct wl_display *display,
 
 		if (wl_display_poll(display, POLLOUT) == -1) {
 			wl_display_cancel_read(display);
+			wl_log("wl_display_poll failed\n");
 			return -1;
 		}
 	}
@@ -1806,19 +1880,29 @@ wl_display_dispatch_queue(struct wl_display *display,
 	/* Don't stop if flushing hits an EPIPE; continue so we can read any
 	 * protocol error that may have triggered it. */
 	if (ret < 0 && errno != EPIPE) {
+		wl_log("ret(%d) errno(%d)\n", ret, errno);
+		display_print_protocol_error_information(display, errno);
 		wl_display_cancel_read(display);
 		return -1;
 	}
 
 	if (wl_display_poll(display, POLLIN) == -1) {
+		wl_log("wl_display_poll failed\n");
 		wl_display_cancel_read(display);
 		return -1;
 	}
 
-	if (wl_display_read_events(display) == -1)
+	if (wl_display_read_events(display) == -1) {
+		wl_log("wl_display_read_events failed\n");
 		return -1;
+	}
 
-	return wl_display_dispatch_queue_pending(display, queue);
+	ret = wl_display_dispatch_queue_pending(display, queue);
+
+	if (ret < 0)
+		wl_log("wl_display_dispatch_queue_pending failed\n");
+
+	return ret;
 }
 
 /** Dispatch pending events in an event queue
