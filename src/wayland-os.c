@@ -34,6 +34,7 @@
 
 #include "../config.h"
 #include "wayland-os.h"
+#include "wayland-private.h"
 
 static int
 set_cloexec_or_close(int fd)
@@ -53,6 +54,7 @@ set_cloexec_or_close(int fd)
 	return fd;
 
 err:
+	wl_log("fcntl failed: %m\n");
 	close(fd);
 	return -1;
 }
@@ -65,10 +67,19 @@ wl_os_socket_cloexec(int domain, int type, int protocol)
 	fd = socket(domain, type | SOCK_CLOEXEC, protocol);
 	if (fd >= 0)
 		return fd;
-	if (errno != EINVAL)
+	if (errno != EINVAL) {
+		wl_log("socket(cloexec) failed: domain(%d) type(%d) protocol(%d) %m\n",
+		       domain, type, protocol);
 		return -1;
+	}
 
 	fd = socket(domain, type, protocol);
+	if (fd < 0) {
+		wl_log("socket failed: domain(%d) type(%d) protocol(%d) %m\n",
+		       domain, type, protocol);
+		return -1;
+	}
+
 	return set_cloexec_or_close(fd);
 }
 
@@ -80,10 +91,17 @@ wl_os_dupfd_cloexec(int fd, long minfd)
 	newfd = fcntl(fd, F_DUPFD_CLOEXEC, minfd);
 	if (newfd >= 0)
 		return newfd;
-	if (errno != EINVAL)
+	if (errno != EINVAL) {
+		wl_log("dupfd(cloexec) failed: fd(%d) minfd(%ld) %m\n", fd, minfd);
 		return -1;
+	}
 
 	newfd = fcntl(fd, F_DUPFD, minfd);
+	if (newfd < 0) {
+		wl_log("dupfd failed: fd(%d) minfd(%ld) %m\n", fd, minfd);
+		return -1;
+	}
+
 	return set_cloexec_or_close(newfd);
 }
 
@@ -97,8 +115,11 @@ recvmsg_cloexec_fallback(int sockfd, struct msghdr *msg, int flags)
 	int *end;
 
 	len = recvmsg(sockfd, msg, flags);
-	if (len == -1)
+	if (len == -1) {
+		if (errno != EINTR && errno != EAGAIN)
+			wl_log("recvmsg failed: sockfd(%d) flags(%d) %m\n", sockfd, flags);
 		return -1;
+	}
 
 	if (!msg->msg_control || msg->msg_controllen == 0)
 		return len;
@@ -126,8 +147,11 @@ wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
 	len = recvmsg(sockfd, msg, flags | MSG_CMSG_CLOEXEC);
 	if (len >= 0)
 		return len;
-	if (errno != EINVAL)
+	if (errno != EINVAL) {
+		if (errno != EAGAIN)
+			wl_log("recvmsg(cloexec) failed: sockfd(%d) flags(%d) %m\n", sockfd, flags);
 		return -1;
+	}
 
 	return recvmsg_cloexec_fallback(sockfd, msg, flags);
 }
@@ -141,11 +165,18 @@ wl_os_epoll_create_cloexec(void)
 	fd = epoll_create1(EPOLL_CLOEXEC);
 	if (fd >= 0)
 		return fd;
-	if (errno != EINVAL)
+	if (errno != EINVAL) {
+		wl_log("epoll_create1(cloexec) failed: %m\n");
 		return -1;
+	}
 #endif
 
 	fd = epoll_create(1);
+	if (fd < 0) {
+		wl_log("epoll_create failed: %m\n");
+		return -1;
+	}
+
 	return set_cloexec_or_close(fd);
 }
 
@@ -158,10 +189,17 @@ wl_os_accept_cloexec(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 	fd = accept4(sockfd, addr, addrlen, SOCK_CLOEXEC);
 	if (fd >= 0)
 		return fd;
-	if (errno != ENOSYS)
+	if (errno != ENOSYS) {
+		wl_log("accept4 failed: sockfd(%d) %m\n", sockfd);
 		return -1;
+	}
 #endif
 
 	fd = accept(sockfd, addr, addrlen);
+	if (fd < 0) {
+		wl_log("accept failed: sockfd(%d) %m\n", sockfd);
+		return -1;
+	}
+
 	return set_cloexec_or_close(fd);
 }
