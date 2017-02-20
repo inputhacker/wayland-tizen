@@ -1312,11 +1312,14 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send)
 	const char *signature = closure->message->signature;
 	struct timespec tp;
 	unsigned int time;
-
+	char temp[1024];
+	char *buf = temp;
+	int length = 1024;
+	int *len = &length;
 	clock_gettime(CLOCK_REALTIME, &tp);
 	time = (tp.tv_sec * 1000000L) + (tp.tv_nsec / 1000);
 
-	fprintf(stderr, "[%10.3f] %s%s@%u.%s(",
+	WL_SNPRINTF(buf, len, "[%d][%d][%10.3f] %s%s@%u.%s(", (int)getpid(), (int)syscall(SYS_gettid),
 		time / 1000.0,
 		send ? " -> " : "",
 		target->interface->name, target->id,
@@ -1325,50 +1328,54 @@ wl_closure_print(struct wl_closure *closure, struct wl_object *target, int send)
 	for (i = 0; i < closure->count; i++) {
 		signature = get_next_argument(signature, &arg);
 		if (i > 0)
-			fprintf(stderr, ", ");
+			WL_SNPRINTF(buf, len, ", ");
 
 		switch (arg.type) {
 		case 'u':
-			fprintf(stderr, "%u", closure->args[i].u);
+			WL_SNPRINTF(buf, len, "%u", closure->args[i].u);
 			break;
 		case 'i':
-			fprintf(stderr, "%d", closure->args[i].i);
+			WL_SNPRINTF(buf, len, "%d", closure->args[i].i);
 			break;
 		case 'f':
-			fprintf(stderr, "%f",
+			WL_SNPRINTF(buf, len, "%f",
 				wl_fixed_to_double(closure->args[i].f));
 			break;
 		case 's':
-			fprintf(stderr, "\"%s\"", closure->args[i].s);
+			WL_SNPRINTF(buf, len, "\"%s\"", closure->args[i].s);
 			break;
 		case 'o':
 			if (closure->args[i].o)
-				fprintf(stderr, "%s@%u",
+				WL_SNPRINTF(buf, len, "%s@%u",
 					closure->args[i].o->interface->name,
 					closure->args[i].o->id);
 			else
-				fprintf(stderr, "nil");
+				WL_SNPRINTF(buf, len, "nil");
 			break;
 		case 'n':
-			fprintf(stderr, "new id %s@",
+			WL_SNPRINTF(buf, len, "new id %s@",
 				(closure->message->types[i]) ?
 				 closure->message->types[i]->name :
 				  "[unknown]");
 			if (closure->args[i].n != 0)
-				fprintf(stderr, "%u", closure->args[i].n);
+				WL_SNPRINTF(buf, len, "%u", closure->args[i].n);
 			else
-				fprintf(stderr, "nil");
+				WL_SNPRINTF(buf, len, "nil");
 			break;
 		case 'a':
-			fprintf(stderr, "array");
+			WL_SNPRINTF(buf, len, "array");
 			break;
 		case 'h':
-			fprintf(stderr, "fd %d", closure->args[i].h);
+			WL_SNPRINTF(buf, len, "fd %d", closure->args[i].h);
 			break;
 		}
 	}
 
-	fprintf(stderr, ")\n");
+#ifdef HAVE_DLOG
+	wl_dlog("%s)", temp);
+#else
+	fprintf(stderr, "%s)\n", temp);
+#endif
 }
 
 void
