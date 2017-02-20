@@ -320,6 +320,10 @@ wl_event_queue_destroy(struct wl_event_queue *queue)
 
 	pthread_mutex_lock(&display->mutex);
 	wl_event_queue_release(queue);
+#ifdef HAVE_DLOG
+	if (debug_client)
+		wl_dlog("queue(%p) destroyed", queue);
+#endif
 	free(queue);
 	pthread_mutex_unlock(&display->mutex);
 }
@@ -340,6 +344,11 @@ wl_display_create_queue(struct wl_display *display)
 	queue = malloc(sizeof *queue);
 	if (queue == NULL)
 		return NULL;
+
+#ifdef HAVE_DLOG
+	if (debug_client)
+		wl_dlog("display(%p) queue(%p) created", display, queue);
+#endif
 
 	pthread_mutex_lock(&display->mutex);
 	wl_event_queue_init(queue, display);
@@ -497,7 +506,8 @@ wl_proxy_add_listener(struct wl_proxy *proxy,
 
 	pthread_mutex_lock(&display->mutex);
 	if (proxy->object.implementation || proxy->dispatcher) {
-		wl_log("proxy %p already has listener\n", proxy);
+		wl_log("proxy %s@%u already has listener\n",
+		       proxy->object.interface->name, proxy->object.id);
 		pthread_mutex_unlock(&display->mutex);
 		return -1;
 	}
@@ -569,7 +579,8 @@ wl_proxy_add_dispatcher(struct wl_proxy *proxy,
 	pthread_mutex_lock(&display->mutex);
 
 	if (proxy->object.implementation || proxy->dispatcher) {
-		wl_log("proxy %p already has listener\n", proxy);
+		wl_log("proxy %s@%u already has listener\n",
+		       proxy->object.interface->name, proxy->object.id);
 		pthread_mutex_unlock(&display->mutex);
 		return -1;
 	}
@@ -1050,6 +1061,11 @@ wl_display_connect_to_fd(int fd)
 	if (!thread_data)
 		goto err_connection;
 
+#ifdef HAVE_DLOG
+	if (debug_client)
+		wl_dlog("display(%p) default_queue(%p) display_queue(%p)", display, &display->default_queue, &display->display_queue);
+#endif
+
 	pthread_mutex_unlock(&display->mutex);
 
 	return display;
@@ -1353,6 +1369,11 @@ queue_event(struct wl_display *display, int len)
 		queue = &display->display_queue;
 	else
 		queue = proxy->queue;
+
+	if (debug_client) {
+		wl_dlog("display_q(%p) default_q(%p) queue(%p) add event", &display->display_queue, &display->default_queue, queue);
+		wl_closure_print(closure, &proxy->object, false);
+	}
 
 	wl_list_insert(queue->event_list.prev, &closure->link);
 
