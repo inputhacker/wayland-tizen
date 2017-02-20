@@ -1343,15 +1343,19 @@ queue_event(struct wl_display *display, int len)
 	message = &proxy->object.interface->events[opcode];
 	closure = wl_connection_demarshal(display->connection, size,
 					  &display->objects, message);
-	if (!closure)
+	if (!closure) {
+		wl_log("wl_connection_demarshal failed\n");
 		return -1;
+	}
 
 	if (create_proxies(proxy, closure) < 0) {
+		wl_log("create_proxies failed\n");
 		wl_closure_destroy(closure);
 		return -1;
 	}
 
 	if (wl_closure_lookup_objects(closure, &display->objects) != 0) {
+		wl_log("wl_closure_lookup_objects failed\n");
 		wl_closure_destroy(closure);
 		return -1;
 	}
@@ -1446,6 +1450,7 @@ read_events(struct wl_display *display)
 				return 0;
 			}
 
+			wl_log("errno(%d)\n", errno);
 			display_fatal_error(display, errno);
 			return -1;
 		} else if (total == 0) {
@@ -1454,12 +1459,14 @@ read_events(struct wl_display *display)
 			 * an errno */
 			errno = EPIPE;
 			display_fatal_error(display, errno);
+			wl_log("pipe error\n");
 			return -1;
 		}
 
 		for (rem = total; rem >= 8; rem -= size) {
 			size = queue_event(display, rem);
 			if (size == -1) {
+				wl_log("queue_event failed\n");
 				display_fatal_error(display, errno);
 				return -1;
 			} else if (size == 0) {
@@ -1549,6 +1556,7 @@ wl_display_read_events(struct wl_display *display)
 	pthread_mutex_lock(&display->mutex);
 
 	if (display->last_error) {
+		wl_log("last_error(%d)\n", display->last_error);
 		cancel_read(display);
 		pthread_mutex_unlock(&display->mutex);
 
@@ -1727,6 +1735,8 @@ wl_display_poll(struct wl_display *display, short int events)
 	pfd[0].events = events;
 	do {
 		ret = poll(pfd, 1, -1);
+		if (ret == -1 || errno == EINTR)
+			wl_log("ret(%d) errno(%d)\n", ret, errno);
 	} while (ret == -1 && errno == EINTR);
 
 	return ret;
@@ -1788,6 +1798,7 @@ wl_display_dispatch_queue(struct wl_display *display,
 
 		if (wl_display_poll(display, POLLOUT) == -1) {
 			wl_display_cancel_read(display);
+			wl_log("wl_display_poll failed\n");
 			return -1;
 		}
 	}
@@ -1795,19 +1806,28 @@ wl_display_dispatch_queue(struct wl_display *display,
 	/* Don't stop if flushing hits an EPIPE; continue so we can read any
 	 * protocol error that may have triggered it. */
 	if (ret < 0 && errno != EPIPE) {
+		wl_log("ret(%d) errno(%d)\n", ret, errno);
 		wl_display_cancel_read(display);
 		return -1;
 	}
 
 	if (wl_display_poll(display, POLLIN) == -1) {
+		wl_log("wl_display_poll failed\n");
 		wl_display_cancel_read(display);
 		return -1;
 	}
 
-	if (wl_display_read_events(display) == -1)
+	if (wl_display_read_events(display) == -1) {
+		wl_log("wl_display_read_events failed\n");
 		return -1;
+	}
 
-	return wl_display_dispatch_queue_pending(display, queue);
+	ret = wl_display_dispatch_queue_pending(display, queue);
+
+	if (ret < 0)
+		wl_log("wl_display_dispatch_queue_pending failed\n");
+
+	return ret;
 }
 
 /** Dispatch pending events in an event queue
