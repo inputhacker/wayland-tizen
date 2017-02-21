@@ -116,7 +116,7 @@ recvmsg_cloexec_fallback(int sockfd, struct msghdr *msg, int flags)
 
 	len = recvmsg(sockfd, msg, flags);
 	if (len == -1) {
-		if (errno != EINTR && errno != EAGAIN)
+		if (errno != EAGAIN && errno != EPIPE)
 			wl_log("recvmsg failed: sockfd(%d) flags(%d) %m\n", sockfd, flags);
 		return -1;
 	}
@@ -148,7 +148,7 @@ wl_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
 	if (len >= 0)
 		return len;
 	if (errno != EINVAL) {
-		if (errno != EAGAIN)
+		if (errno != EAGAIN && errno != EPIPE)
 			wl_log("recvmsg(cloexec) failed: sockfd(%d) flags(%d) %m\n", sockfd, flags);
 		return -1;
 	}
