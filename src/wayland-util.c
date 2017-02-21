@@ -410,9 +410,9 @@ wl_debug_server_enable(int enable)
 	debug_server = !!enable;
 }
 
-#ifdef HAVE_DLOG
 int debug_dlog;
 
+#ifdef HAVE_DLOG
 void
 _wl_dlog(const char *fmt, ...)
 {

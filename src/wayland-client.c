@@ -49,6 +49,8 @@
 #include "wayland-client.h"
 #include "wayland-private.h"
 
+//#define WL_DEBUG_QUEUE
+
 /** \cond */
 
 enum wl_proxy_flag {
@@ -163,6 +165,8 @@ display_fatal_error(struct wl_display *display, int error)
 		error = EFAULT;
 
 	display->last_error = error;
+
+	wl_log("got fatal error: %d\n", error);
 
 	display_wakeup_threads(display);
 }
@@ -317,7 +321,7 @@ wl_event_queue_destroy(struct wl_event_queue *queue)
 
 	pthread_mutex_lock(&display->mutex);
 	wl_event_queue_release(queue);
-#ifdef HAVE_DLOG
+#ifdef WL_DEBUG_QUEUE
 	if (debug_client)
 		wl_dlog("queue(%p) destroyed", queue);
 #endif
@@ -342,7 +346,7 @@ wl_display_create_queue(struct wl_display *display)
 	if (queue == NULL)
 		return NULL;
 
-#ifdef HAVE_DLOG
+#ifdef WL_DEBUG_QUEUE
 	if (debug_client)
 		wl_dlog("display(%p) queue(%p) created", display, queue);
 #endif
@@ -998,11 +1002,9 @@ wl_display_connect_to_fd(int fd)
 	struct wl_thread_data *thread_data;
 	const char *debug;
 
-#ifdef HAVE_DLOG
 	debug = getenv("WAYLAND_DLOG");
 	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
 		debug_dlog = 1;
-#endif
 
 	debug = getenv("WAYLAND_DEBUG");
 	if (debug && (strstr(debug, "client") || strstr(debug, "1")))
@@ -1072,9 +1074,10 @@ wl_display_connect_to_fd(int fd)
 	if (!thread_data)
 		goto err_connection;
 
-#ifdef HAVE_DLOG
+#ifdef WL_DEBUG_QUEUE
 	if (debug_client)
-		wl_dlog("display(%p) default_queue(%p) display_queue(%p)", display, &display->default_queue, &display->display_queue);
+		wl_dlog("display(%p) default_queue(%p) display_queue(%p) fd(%d)",
+		        display, &display->default_queue, &display->display_queue, display->fd);
 #endif
 
 	pthread_mutex_unlock(&display->mutex);
@@ -1159,6 +1162,11 @@ wl_display_disconnect(struct wl_display *display)
 	pthread_mutex_destroy(&display->mutex);
 	pthread_cond_destroy(&display->reader_cond);
 	close(display->fd);
+
+#ifdef WL_DEBUG_QUEUE
+	if (debug_client)
+		wl_dlog("display(%p) disconnected", display);
+#endif
 
 	free(display);
 }
@@ -1385,10 +1393,12 @@ queue_event(struct wl_display *display, int len)
 	else
 		queue = proxy->queue;
 
+#ifdef WL_DEBUG_QUEUE
 	if (debug_client) {
 		wl_dlog("display_q(%p) default_q(%p) queue(%p) add event", &display->display_queue, &display->default_queue, queue);
 		wl_closure_print(closure, &proxy->object, false);
 	}
+#endif
 
 	wl_list_insert(queue->event_list.prev, &closure->link);
 
@@ -1459,6 +1469,8 @@ read_events(struct wl_display *display)
 	display->reader_count--;
 	if (display->reader_count == 0) {
 		total = wl_connection_read(display->connection);
+		if (total < 0 && errno != EAGAIN && errno != EPIPE)
+			wl_log("read failed: total(%d) errno(%d)", total, errno);
 		if (total == -1) {
 			if (errno == EAGAIN) {
 				/* we must wake up threads whenever

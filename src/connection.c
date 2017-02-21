@@ -340,7 +340,7 @@ wl_connection_flush(struct wl_connection *connection)
 		} while (len == -1 && errno == EINTR);
 
 		if (len == -1) {
-			if (errno != EINTR && errno != EAGAIN)
+			if (errno != EAGAIN && errno != EPIPE)
 				wl_log("sendmsg failed. %m\n");
 			return -1;
 		}
@@ -398,7 +398,7 @@ wl_connection_read(struct wl_connection *connection)
 	} while (len < 0 && errno == EINTR);
 
 	if (len <= 0) {
-		if (errno != EINTR && errno != EAGAIN)
+		if (errno != EAGAIN && errno != EPIPE)
 			wl_log("wl_os_recvmsg_cloexec failed. len(%d)\n", len);
 		return len;
 	}
