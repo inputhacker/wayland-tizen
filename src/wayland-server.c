@@ -59,6 +59,8 @@
 #define LOCK_SUFFIX	".lock"
 #define LOCK_SUFFIXLEN	5
 
+#define WL_CLIENT_NAME_MAX	256
+
 struct wl_socket {
 	int fd;
 	int fd_lock;
@@ -80,6 +82,7 @@ struct wl_client {
 	struct wl_map objects;
 	struct wl_signal destroy_signal;
 	struct ucred ucred;
+	char proc_name[WL_CLIENT_NAME_MAX];
 	int error;
 };
 
@@ -273,6 +276,9 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 
 	if (mask & WL_EVENT_WRITABLE) {
 		len = wl_connection_flush(connection);
+		if (len < 0 && errno != EAGAIN && errno != EPIPE)
+			wl_log("client_proc(%s) flush failed: len(%d) errno(%d)\n",
+				   client->proc_name, len, errno);
 		if (len < 0 && errno != EAGAIN) {
 			wl_client_destroy(client);
 			return 1;
@@ -285,6 +291,9 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	len = 0;
 	if (mask & WL_EVENT_READABLE) {
 		len = wl_connection_read(connection);
+		if (len < 0 && errno != EAGAIN && errno != EPIPE)
+			wl_log("client_proc(%s) read failed: len(%d) errno(%d)",
+				   client->proc_name, len, errno);
 		if (len == 0 || (len < 0 && errno != EAGAIN)) {
 			wl_client_destroy(client);
 			return 1;
@@ -397,7 +406,11 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 WL_EXPORT void
 wl_client_flush(struct wl_client *client)
 {
-	wl_connection_flush(client->connection);
+	int ret = wl_connection_flush(client->connection);
+
+	if (ret < 0 && errno != EAGAIN && errno != EPIPE)
+		wl_log("client_proc(%s) flush failed: ret(%d) errno(%d)\n",
+			   client->proc_name, ret, errno);
 }
 
 /** Get the display object for the given client
@@ -411,6 +424,39 @@ WL_EXPORT struct wl_display *
 wl_client_get_display(struct wl_client *client)
 {
 	return client->display;
+}
+
+static void
+wl_client_get_process_name(struct wl_client *client)
+{
+	char proc[WL_CLIENT_NAME_MAX], pname[WL_CLIENT_NAME_MAX];
+	FILE *h = NULL;
+	size_t len;
+
+	if (client->ucred.pid <= 0)
+		goto no_name;
+
+	snprintf(proc, WL_CLIENT_NAME_MAX, "/proc/%d/cmdline", client->ucred.pid);
+	h = fopen(proc, "r");
+	if (!h)
+		goto no_name;
+
+	len = fread(pname, sizeof(char), WL_CLIENT_NAME_MAX, h);
+	if (len == 0)
+		goto no_name;
+
+	pname[len - 1] = '\0';
+
+	strncpy(client->proc_name, pname, WL_CLIENT_NAME_MAX - 1);
+	client->proc_name[WL_CLIENT_NAME_MAX - 1] = '\0';
+
+	fclose(h);
+
+	return;
+no_name:
+	snprintf(client->proc_name, WL_CLIENT_NAME_MAX, "Unknown");
+	if (h)
+		fclose(h);
 }
 
 static int
@@ -473,6 +519,8 @@ wl_client_create(struct wl_display *display, int fd)
 	wl_signal_init(&client->destroy_signal);
 	if (bind_display(client, display) < 0)
 		goto err_map;
+
+	wl_client_get_process_name(client);
 
 	wl_list_insert(display->client_list.prev, &client->link);
 
@@ -892,11 +940,9 @@ wl_display_create(void)
 	struct wl_display *display;
 	const char *debug;
 
-#ifdef HAVE_DLOG
 	debug = getenv("WAYLAND_DLOG");
 	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
 		debug_dlog = 1;
-#endif
 
 	debug = getenv("WAYLAND_DEBUG");
 	if (debug && (strstr(debug, "server") || strstr(debug, "1")))
@@ -1114,6 +1160,9 @@ wl_display_flush_clients(struct wl_display *display)
 
 	wl_list_for_each_safe(client, next, &display->client_list, link) {
 		ret = wl_connection_flush(client->connection);
+		if (ret < 0 && errno != EAGAIN && errno != EPIPE)
+			wl_log("client_proc(%s) flush failed: ret(%d) errno(%d)\n",
+				   client->proc_name, ret, errno);
 		if (ret < 0 && errno == EAGAIN) {
 			wl_event_source_fd_update(client->source,
 						  WL_EVENT_WRITABLE |

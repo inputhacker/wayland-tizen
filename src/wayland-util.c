@@ -390,9 +390,9 @@ wl_debug_server_enable(int enable)
 
 /** \endcond */
 
-#ifdef HAVE_DLOG
 int debug_dlog;
 
+#ifdef HAVE_DLOG
 void
 _wl_dlog(const char *fmt, ...)
 {
