@@ -244,11 +244,11 @@ wl_debug_client_enable(int enable);
 void
 wl_debug_server_enable(int enable);
 
-#ifdef HAVE_DLOG
 #include <sys/syscall.h>
 
 extern int debug_dlog;
 
+#ifdef HAVE_DLOG
 void _wl_dlog(const char *fmt, ...);
 
 #define wl_dlog(fmt, args...) \
@@ -258,6 +258,8 @@ void _wl_dlog(const char *fmt, ...);
 		else \
 			_wl_dlog("[%d][%s %d]"fmt"\n", (int)syscall(SYS_gettid), __FUNCTION__, __LINE__, ##args); \
 	} while (0)
+#else
+#define wl_dlog(fmt, args...) do { (void) fmt; } while (0)
 #endif
 
 extern wl_log_func_t wl_log_handler;
