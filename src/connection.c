@@ -491,7 +491,10 @@ wl_message_count_arrays(const struct wl_message *message)
 int
 wl_connection_get_fd(struct wl_connection *connection)
 {
-	return connection->fd;
+	if (connection)
+		return connection->fd;
+	else
+		return -1;
 }
 
 static int
