@@ -104,6 +104,8 @@ struct wl_display {
 	struct wl_signal create_client_signal;
 
 	struct wl_array additional_shm_formats;
+
+	int super_user;
 };
 
 struct wl_global {
@@ -460,6 +462,9 @@ wl_client_get_process_name(struct wl_client *client)
 	char proc[WL_CLIENT_NAME_MAX], pname[WL_CLIENT_NAME_MAX];
 	FILE *h = NULL;
 	size_t len;
+
+	if (!client->display->super_user)
+		goto no_name;
 
 	if (client->ucred.pid <= 0)
 		goto no_name;
@@ -1006,6 +1011,8 @@ wl_display_create(void)
 	display->serial = 0;
 
 	wl_array_init(&display->additional_shm_formats);
+
+	display->super_user = (getuid() == 0) ? 1 : 0;
 
 	return display;
 }
