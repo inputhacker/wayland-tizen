@@ -63,14 +63,17 @@ struct wl_connection {
 	int want_flush;
 };
 
+static uint32_t wl_buffer_size(struct wl_buffer *b);
+
 static int
 wl_buffer_put(struct wl_buffer *b, const void *data, size_t count)
 {
 	uint32_t head, size;
+	size_t max;
 
-	if (count > sizeof(b->data)) {
-		wl_log("Data too big for buffer (%d > %d).\n",
-		       count, sizeof(b->data));
+	max = sizeof(b->data) - wl_buffer_size(b);
+	if (count > max) {
+		wl_log("Data too big for buffer (%d > %d).\n", count, max);
 		errno = E2BIG;
 		return -1;
 	}
