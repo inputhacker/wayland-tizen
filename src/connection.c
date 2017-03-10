@@ -415,15 +415,22 @@ wl_connection_get_fd(struct wl_connection *connection)
 }
 
 static int
-wl_connection_put_fd(struct wl_connection *connection, int32_t fd)
+wl_connection_put_fds(struct wl_connection *connection, int32_t *fds, int count)
 {
-	if (wl_buffer_size(&connection->fds_out) == MAX_FDS_OUT * sizeof fd) {
+	int i;
+
+	if (wl_buffer_size(&connection->fds_out) + count * sizeof fds[0] > MAX_FDS_OUT * sizeof fds[0]) {
 		connection->want_flush = 1;
 		if (wl_connection_flush(connection) < 0)
 			return -1;
 	}
 
-	return wl_buffer_put(&connection->fds_out, &fd, sizeof fd);
+	for (i = 0; i < count; i++) {
+		if (wl_buffer_put(&connection->fds_out, fds + i, sizeof fds[0]) < 0)
+			return -1;
+	}
+
+	return 0;
 }
 
 const char *
@@ -954,7 +961,8 @@ copy_fds_to_connection(struct wl_closure *closure,
 	uint32_t i, count;
 	struct argument_details arg;
 	const char *signature = message->signature;
-	int fd;
+	int fds[MAX_FDS_OUT];
+	int fd_count = 0;
 
 	count = arg_count_for_signature(signature);
 	for (i = 0; i < count; i++) {
@@ -962,13 +970,22 @@ copy_fds_to_connection(struct wl_closure *closure,
 		if (arg.type != 'h')
 			continue;
 
-		fd = closure->args[i].h;
-		if (wl_connection_put_fd(connection, fd)) {
+		if (fd_count >= MAX_FDS_OUT) {
+			wl_log("request could not be marshaled: "
+			       "too many file descriptors");
+			return -1;
+		}
+
+		fds[fd_count] = closure->args[i].h;
+		fd_count++;
+	}
+
+	if (fd_count > 0)
+		if (wl_connection_put_fds(connection, fds, fd_count)) {
 			wl_log("request could not be marshaled: "
 			       "can't send file descriptor");
 			return -1;
 		}
-	}
 
 	return 0;
 }
