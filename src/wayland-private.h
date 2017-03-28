@@ -67,9 +67,22 @@ struct wl_object {
 extern struct wl_object global_zombie_object;
 #define WL_ZOMBIE_OBJECT ((void*)&global_zombie_object)
 
+// TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+/* Enum values to refer to
+ * wl_connection in & out buffers
+ */
+enum wl_buffer_type {
+	IN,
+	OUT
+};
+// END
+
 int
 wl_interface_equal(const struct wl_interface *iface1,
 		   const struct wl_interface *iface2);
+/* Enum values to refer to
+ * wl_connection in & out buffers
+ */
 
 /* Flags for wl_map_insert_new and wl_map_insert_at.  Flags can be queried with
  * wl_map_lookup_flags.  The current implementation has room for 1 bit worth of
@@ -107,6 +120,11 @@ wl_map_reserve_new(struct wl_map *map, uint32_t i);
 void
 wl_map_remove(struct wl_map *map, uint32_t i);
 
+// TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+int
+wl_map_client_entries_count(struct wl_map *map);
+// END
+
 void *
 wl_map_lookup(struct wl_map *map, uint32_t i);
 
@@ -130,6 +148,11 @@ wl_connection_consume(struct wl_connection *connection, size_t size);
 
 void
 wl_connection_consume_fds_in(struct wl_connection *connection);
+
+// TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+void
+wl_print_connection_data(struct wl_connection *connection, enum wl_buffer_type);
+// END
 
 int
 wl_connection_flush(struct wl_connection *connection);
