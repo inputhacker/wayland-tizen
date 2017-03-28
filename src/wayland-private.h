@@ -66,6 +66,14 @@ struct wl_object {
 extern struct wl_object global_zombie_object;
 #define WL_ZOMBIE_OBJECT ((void*)&global_zombie_object)
 
+/* Enum values to refer to
+ * wl_connection in & out buffers
+ */
+enum wl_buffer_type {
+	IN,
+	OUT
+};
+
 /* Flags for wl_map_insert_new and wl_map_insert_at.  Flags can be queried with
  * wl_map_lookup_flags.  The current implementation has room for 1 bit worth of
  * flags.  If more flags are ever added, the implementation of wl_map will have
@@ -101,6 +109,9 @@ wl_map_reserve_new(struct wl_map *map, uint32_t i);
 void
 wl_map_remove(struct wl_map *map, uint32_t i);
 
+int
+wl_map_client_entries_count(struct wl_map *map);
+
 void *
 wl_map_lookup(struct wl_map *map, uint32_t i);
 
@@ -132,6 +143,9 @@ wl_connection_consume(struct wl_connection *connection, size_t size);
 
 void
 wl_connection_consume_fds_in(struct wl_connection *connection);
+
+void
+wl_print_connection_data(struct wl_connection *connection, enum wl_buffer_type);
 
 int
 wl_connection_flush(struct wl_connection *connection);
