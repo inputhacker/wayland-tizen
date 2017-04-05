@@ -319,6 +319,15 @@ wl_cursor_create_from_xcursor_images(XcursorImages *images,
 		image->image.delay = images->images[i]->delay;
 
 		size = image->image.width * image->image.height * 4;
+		if ((theme->pool->used + size) > theme->pool->size) {
+			shm_pool_destroy(theme->pool);
+			theme->pool = shm_pool_create(theme->shm, 2 * theme->pool->size + size);
+			if (!theme->pool) {
+				free(image);
+				break;
+			}
+		}
+
 		image->offset = shm_pool_allocate(theme->pool, size);
 		if (image->offset < 0) {
 			free(image);
@@ -445,6 +454,7 @@ wl_cursor_theme_load(const char *name, int size, struct wl_shm *shm)
 	theme->size = size;
 	theme->cursor_count = 0;
 	theme->cursors = NULL;
+	theme->shm = shm;
 
 	theme->pool = shm_pool_create(shm, size * size * 4);
 	if (!theme->pool)
