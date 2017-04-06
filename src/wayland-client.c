@@ -1008,6 +1008,9 @@ connect_to_socket(const char *name)
 	size = offsetof (struct sockaddr_un, sun_path) + name_size;
 
 	if (connect(fd, (struct sockaddr *) &addr, size) < 0) {
+		// TIZEN_ONLY(20170410): Debug logs to identify the failure cause of wl_display_connect()
+		wl_log("connect() failed: fd(%d) errno(%d, %m)\n", fd, errno);
+		// END
 		close(fd);
 		return -1;
 	}
@@ -1043,6 +1046,10 @@ wl_display_connect_to_fd(int fd)
 
 	display = zalloc(sizeof *display);
 	if (display == NULL) {
+		// TIZEN_ONLY(20170410): Debbug logs to identify the failure cause of wl_display_connect()
+		wl_log("no memory\n");
+		errno = ENOMEM;
+		// END
 		close(fd);
 		return NULL;
 	}
@@ -1109,6 +1116,9 @@ wl_display_connect_to_fd(int fd)
 	return display;
 
  err_connection:
+	// TIZEN_ONLY(20170410): Debug logs to identify the failure cause of wl_display_connect()
+	wl_log("%s() failed\n", __func__);
+	// END
 	pthread_mutex_unlock(&display->mutex);
 	pthread_mutex_destroy(&display->mutex);
 	pthread_cond_destroy(&display->reader_cond);
