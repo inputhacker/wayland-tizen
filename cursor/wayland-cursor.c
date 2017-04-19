@@ -289,7 +289,7 @@ wl_cursor_create_from_xcursor_images(XcursorImages *images,
 {
 	struct cursor *cursor;
 	struct cursor_image *image;
-	int i, size;
+	int i, size, origin_size;;
 
 	cursor = malloc(sizeof *cursor);
 	if (!cursor)
@@ -321,8 +321,9 @@ wl_cursor_create_from_xcursor_images(XcursorImages *images,
 
 		size = image->image.width * image->image.height * 4;
 		if ((theme->pool->used + size) > theme->pool->size) {
+			origin_size = theme->pool->size;
 			shm_pool_destroy(theme->pool);
-			theme->pool = shm_pool_create(theme->shm, 2 * theme->pool->size + size);
+			theme->pool = shm_pool_create(theme->shm, 2 * origin_size + size);
 			if (!theme->pool) {
 				free(image);
 				break;
