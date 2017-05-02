@@ -153,7 +153,7 @@ log_closure(struct wl_resource *resource,
 	struct wl_protocol_logger_message message;
 
 	if (wl_server_debug_func)
-		wl_server_debug_func(closure, resource, false);
+		wl_server_debug_func(closure, resource, send);
 
 	if (debug_server)
 		wl_closure_print(closure, object, send);
