@@ -73,6 +73,18 @@ wl_egl_window_set_rotation(struct wl_egl_window *egl_window,
 int
 wl_egl_window_get_capabilities(struct wl_egl_window *egl_window);
 
+void
+wl_egl_window_set_buffer_transform(struct wl_egl_window *egl_window,
+								   int wl_output_transform);
+
+void
+wl_egl_window_set_frontbuffer_mode(struct wl_egl_window *egl_window,
+								   int set);
+
+void
+wl_egl_window_set_window_transform(struct wl_egl_window *egl_window,
+								   int window_transform);
+
 #ifdef  __cplusplus
 }
 #endif
