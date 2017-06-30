@@ -459,10 +459,13 @@ wl_log(const char *fmt, ...)
 {
 	va_list argp;
 
-	va_start(argp, fmt);
 #ifdef HAVE_DLOG
+	va_start(argp, fmt);
 	dlog_vprint(DLOG_ERROR, WLLOG_TAG, fmt, argp);
+	va_end(argp);
 #endif
+
+	va_start(argp, fmt);
 	wl_log_handler(fmt, argp);
 	va_end(argp);
 }
@@ -472,10 +475,13 @@ wl_abort(const char *fmt, ...)
 {
 	va_list argp;
 
-	va_start(argp, fmt);
 #ifdef HAVE_DLOG
+	va_start(argp, fmt);
 	dlog_vprint(DLOG_ERROR, WLLOG_TAG, fmt, argp);
+	va_end(argp);
 #endif
+
+	va_start(argp, fmt);
 	wl_log_handler(fmt, argp);
 	va_end(argp);
 
