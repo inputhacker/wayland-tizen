@@ -93,7 +93,7 @@ wl_display_remove_global(struct wl_display *display,
 
 #endif
 
-typedef void (*wl_server_debug_func_ptr)(struct wl_closure *closure,
+typedef void (*wl_server_debug_func_ptr)(void *closure,
 	struct wl_resource *resource, int send);
 
 wl_server_debug_func_ptr
