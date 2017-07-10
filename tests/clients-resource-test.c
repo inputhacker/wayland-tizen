@@ -2,14 +2,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "wayland-private.h"
 #include "wayland-server.h"
 #include "test-runner.h"
 
-
+#ifndef wl_client_for_each
 #define wl_client_for_each(client, list)     \
    for (client = 0, client = wl_client_from_link((list)->next);   \
         wl_client_get_link(client) != (list);                     \
         client = wl_client_from_link(wl_client_get_link(client)->next))
+#endif
 
 TEST(query_clients_tst)
 {
@@ -42,15 +44,18 @@ TEST(query_clients_tst)
    wl_display_destroy(display);
 }
 
-static unsigned res_id = 0;
-static void resource_cb_func(void *element, void *data)
+static uint32_t res_id = 0;
+static enum wl_iterator_result
+resource_cb_func(void *element, void *data)
 {
    struct wl_resource *resource = element;
    int *find_resource = data;
-   int id = 0;
+   uint32_t id = 0;
 
    id = wl_resource_get_id(resource);
    if (id == res_id) *find_resource = 1;
+
+   return WL_ITERATOR_CONTINUE;
 }
 
 TEST(query_clients_resource_tst)
