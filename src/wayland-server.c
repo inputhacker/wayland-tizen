@@ -952,8 +952,15 @@ registry_bind(struct wl_client *client,
 		global->bind(client, global->data, version, id);
 }
 
+static void
+registry_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
 static const struct wl_registry_interface registry_interface = {
-	registry_bind
+	registry_bind,
+	registry_destroy
 };
 
 static void
