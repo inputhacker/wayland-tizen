@@ -169,6 +169,12 @@
       </description>
       <arg name="name" type="uint" summary="numeric name of the global object"/>
     </event>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the registry">
+	Destroy the registry.
+      </description>
+    </request>
   </interface>
 
   <interface name="wl_callback" version="1">
