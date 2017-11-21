@@ -245,7 +245,19 @@ wl_resource_post_event(struct wl_resource *resource, uint32_t opcode, ...)
 {
 	union wl_argument args[WL_CLOSURE_MAX_ARGS];
 	struct wl_object *object = &resource->object;
+	const struct wl_message *message;
+	int since, version;
 	va_list ap;
+
+	message = &object->interface->events[opcode];
+	since = wl_message_get_since(message);
+	version = wl_resource_get_version (resource);
+
+	if (version < since)
+	{
+		wl_log("Invalid event since (%d < %d). Opcode: %d Event: %s Interface: %s \n",
+			version, since, opcode, message->name, object->interface->name);
+	}
 
 	va_start(ap, opcode);
 	wl_argument_from_va_list(object->interface->events[opcode].signature,
