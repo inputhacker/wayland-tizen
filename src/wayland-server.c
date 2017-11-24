@@ -323,6 +323,8 @@ wl_client_connection_data(int fd, uint32_t mask, void *data)
 	int pid;
 
 	if (mask & (WL_EVENT_ERROR | WL_EVENT_HANGUP)) {
+		wl_log("Mask has error/hangup flag set, client_proc(%s) mask[%x]",
+			   client->proc_name, mask);
 		wl_client_destroy(client);
 		return 1;
 	}
