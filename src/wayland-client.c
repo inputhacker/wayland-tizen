@@ -1818,8 +1818,6 @@ wl_display_poll(struct wl_display *display, short int events)
 	pfd[0].events = events;
 	do {
 		ret = poll(pfd, 1, -1);
-		if (ret == -1 || errno == EINTR)
-			wl_log("ret(%d) errno(%d)\n", ret, errno);
 	} while (ret == -1 && errno == EINTR);
 
 	return ret;
