@@ -106,6 +106,7 @@ struct wl_display {
 		 * that the proxy is still valid. It's up to client how it will
 		 * use it */
 		uint32_t id;
+		char message[512];
 	} protocol_error;
 	int fd;
 	struct wl_map objects;
@@ -164,6 +165,13 @@ display_fatal_error(struct wl_display *display, int error)
 	wl_log("got fatal error: %d\n", error);
 
 	display_wakeup_threads(display);
+}
+
+static void
+display_print_protocol_error_information(struct wl_display *display, int error)
+{
+	if (error == EINVAL || error == ENOMEM || error == EFAULT || error == EPROTO)
+		wl_log("error(%d) %s", error, display->protocol_error.message);
 }
 
 /**
@@ -942,12 +950,25 @@ display_handle_error(void *data,
 
 		object_id = proxy->object.id;
 		interface = proxy->object.interface;
+
+		pthread_mutex_lock(&display->mutex);
+		if (!display->last_error)
+			snprintf(display->protocol_error.message, 512, "%s@%u: error %d: %s\n",
+			         proxy->object.interface->name, proxy->object.id, code, message);
+		pthread_mutex_unlock(&display->mutex);
+
 	} else {
 		wl_log("[destroyed object]: error %d: %s\n",
 		       code, message);
 
 		object_id = 0;
 		interface = NULL;
+
+		pthread_mutex_lock(&display->mutex);
+		if (!display->last_error)
+			snprintf(display->protocol_error.message, 512,
+			         "[destroyed object]: error %d: %s\n", code, message);
+		pthread_mutex_unlock(&display->mutex);
 	}
 
 	display_protocol_error(display, code, object_id, interface);
@@ -1090,6 +1111,8 @@ wl_display_connect_to_fd(int fd)
 	display->proxy.queue = &display->default_queue;
 	display->proxy.flags = 0;
 	display->proxy.refcount = 1;
+
+	display->protocol_error.message[0] = '\0';
 
 	/* We set this version to 0 for backwards compatibility.
 	 *
@@ -1640,6 +1663,7 @@ wl_display_read_events(struct wl_display *display)
 
 	if (display->last_error) {
 		wl_log("last_error(%d)\n", display->last_error);
+		display_print_protocol_error_information(display, display->last_error);
 		cancel_read(display);
 		pthread_mutex_unlock(&display->mutex);
 
@@ -1888,6 +1912,7 @@ wl_display_dispatch_queue(struct wl_display *display,
 	 * protocol error that may have triggered it. */
 	if (ret < 0 && errno != EPIPE) {
 		wl_log("ret(%d) errno(%d)\n", ret, errno);
+		display_print_protocol_error_information(display, errno);
 		wl_display_cancel_read(display);
 		return -1;
 	}
