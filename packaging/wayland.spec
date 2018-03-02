@@ -60,12 +60,21 @@ evdev input devices, an X application, or a wayland client itself.
 The clients can be traditional applications, X servers (rootless or
 fullscreen) or other display servers.
 
+%package -n libwayland-egl
+Group:		Graphics & UI Framework/Wayland Window System
+Summary:	Wayland egl library
+
+%description -n libwayland-egl
+The purpose of this library is to support wayland-egl frontend APIs and
+make the backend for each target.
+
 %package devel
 Summary:	Development files for the Wayland Compositor Infrastructure
 Group:		Graphics & UI Framework/Development
 Requires:	libwayland-client = %version
 Requires:	libwayland-cursor = %version
 Requires:	libwayland-server = %version
+Requires:	libwayland-egl = %version
 
 %description devel
 Wayland is a protocol for a compositor to talk to its clients as well
@@ -95,6 +104,8 @@ make %{?_smp_mflags}
 %postun -n libwayland-cursor -p /sbin/ldconfig
 %post -n libwayland-server -p /sbin/ldconfig
 %postun -n libwayland-server -p /sbin/ldconfig
+%post -n libwayland-egl -p /sbin/ldconfig
+%postun -n libwayland-egl -p /sbin/ldconfig
 
 %files -n libwayland-client
 %manifest %{name}.manifest
@@ -113,6 +124,12 @@ make %{?_smp_mflags}
 %license COPYING
 %defattr(-,root,root)
 %_libdir/libwayland-server.so.0*
+
+%files -n libwayland-egl
+%manifest %{name}.manifest
+%license COPYING
+%defattr(-,root,root)
+%_libdir/libwayland-egl.so.1*
 
 %files devel
 %manifest %{name}.manifest
