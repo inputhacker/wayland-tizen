@@ -147,11 +147,14 @@ libwayland_cursor_la_CFLAGS =			\
 	-I$(top_srcdir)/src			\
 	-DICONDIR=\"$(ICONDIR)\"
 
+if HAVE_EGLLIB
 lib_LTLIBRARIES += libwayland-egl.la
+endif
 
 include_HEADERS += egl/wayland-egl.h
 include_HEADERS += egl/wayland-egl-core.h
 
+if HAVE_EGLLIB
 libwayland_egl_la_SOURCES = egl/wayland-egl.c
 libwayland_egl_la_LDFLAGS = -version-info 1
 
@@ -160,6 +163,7 @@ pkgconfig_DATA += egl/wayland-egl.pc
 ## XXX: backend interface
 include_HEADERS += egl/wayland-egl-backend.h
 pkgconfig_DATA += egl/wayland-egl-backend.pc
+endif
 
 built_test_programs =				\
 	array-test				\
@@ -181,18 +185,22 @@ built_test_programs =				\
 	message-test				\
 	headers-test				\
 	compositor-introspection-test		\
-	protocol-logger-test			\
-	wayland-egl-abi-check
+	protocol-logger-test
+
+if HAVE_EGLLIB
+built_test_programs += wayland-egl-abi-check
 
 EXTRA_DIST += egl/wayland-egl-symbols-check
 
 check_PROGRAMS = wayland-egl-abi-check
 wayland_egl_abi_check_SOURCES = egl/wayland-egl-abi-check.c
+endif
 
 if ENABLE_CPP_TEST
 built_test_programs += cpp-compile-test
 endif
 
+if HAVE_EGLLIB
 AM_TESTS_ENVIRONMENT =							\
 	export WAYLAND_SCANNER='$(top_builddir)/wayland-scanner'	\
 	TEST_DATA_DIR='$(top_srcdir)/tests/data'			\
@@ -205,6 +213,17 @@ AM_TESTS_ENVIRONMENT =							\
 TESTS = $(built_test_programs)			\
 	egl/wayland-egl-symbols-check		\
 	tests/scanner-test.sh
+else
+AM_TESTS_ENVIRONMENT =							\
+	export WAYLAND_SCANNER='$(top_builddir)/wayland-scanner'	\
+	TEST_DATA_DIR='$(top_srcdir)/tests/data'			\
+	TEST_OUTPUT_DIR='$(top_builddir)/tests/output'			\
+	SED=$(SED)							\
+	;
+
+TESTS = $(built_test_programs)			\
+	tests/scanner-test.sh
+endif
 
 noinst_PROGRAMS =				\
 	$(built_test_programs)			\

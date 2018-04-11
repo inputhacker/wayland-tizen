@@ -183,6 +183,11 @@ if test "x$enable_documentation" = "xyes"; then
 fi
 AM_CONDITIONAL([HAVE_XMLTO], [test "x$XMLTO" != "x"])
 
+AC_ARG_WITH(egllib, AS_HELP_STRING([--with-egllib=yes/no], [whether build/run egllib or not]),
+				[ egllib="$withval" ],
+				[ egllib="no" ])
+AM_CONDITIONAL(HAVE_EGLLIB, test "x$egllib" = "xyes")
+
 AC_CONFIG_FILES([Makefile
 		 cursor/wayland-cursor.pc
 		 cursor/wayland-cursor-uninstalled.pc

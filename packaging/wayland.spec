@@ -1,3 +1,5 @@
+%define EGL_PACKAGE 0
+
 Name:		wayland
 Version:	1.15.0
 Release:	0
@@ -60,6 +62,7 @@ evdev input devices, an X application, or a wayland client itself.
 The clients can be traditional applications, X servers (rootless or
 fullscreen) or other display servers.
 
+%if "%{EGL_PACKAGE}" == "1"
 %package -n libwayland-egl
 Group:		Graphics & UI Framework/Wayland Window System
 Summary:	Wayland egl library
@@ -67,6 +70,7 @@ Summary:	Wayland egl library
 %description -n libwayland-egl
 The purpose of this library is to support wayland-egl frontend APIs and
 make the backend for each target.
+%endif
 
 %package devel
 Summary:	Development files for the Wayland Compositor Infrastructure
@@ -74,7 +78,9 @@ Group:		Graphics & UI Framework/Development
 Requires:	libwayland-client = %version
 Requires:	libwayland-cursor = %version
 Requires:	libwayland-server = %version
+%if "%{EGL_PACKAGE}" == "1"
 Requires:	libwayland-egl = %version
+%endif
 
 %description devel
 Wayland is a protocol for a compositor to talk to its clients as well
@@ -92,7 +98,12 @@ to develop applications that require these.
 cp %{SOURCE1001} .
 
 %build
-%reconfigure --disable-static --disable-documentation
+EGLLIB="no"
+%if "%{EGL_PACKAGE}" == "1"
+EGLLIB="yes"
+%endif
+
+%reconfigure --disable-static --disable-documentation --with-egllib=${EGLLIB}
 make %{?_smp_mflags}
 
 %install
@@ -104,8 +115,10 @@ make %{?_smp_mflags}
 %postun -n libwayland-cursor -p /sbin/ldconfig
 %post -n libwayland-server -p /sbin/ldconfig
 %postun -n libwayland-server -p /sbin/ldconfig
+%if "%{EGL_PACKAGE}" == "1"
 %post -n libwayland-egl -p /sbin/ldconfig
 %postun -n libwayland-egl -p /sbin/ldconfig
+%endif
 
 %files -n libwayland-client
 %manifest %{name}.manifest
@@ -125,11 +138,13 @@ make %{?_smp_mflags}
 %defattr(-,root,root)
 %_libdir/libwayland-server.so.0*
 
+%if "%{EGL_PACKAGE}" == "1"
 %files -n libwayland-egl
 %manifest %{name}.manifest
 %license COPYING
 %defattr(-,root,root)
 %_libdir/libwayland-egl.so.1*
+%endif
 
 %files devel
 %manifest %{name}.manifest
