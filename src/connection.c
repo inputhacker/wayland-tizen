@@ -1177,6 +1177,31 @@ overflow:
 	return -1;
 }
 
+static int
+closure_has_fds(struct wl_closure *closure)
+{
+	const struct wl_message *message = closure->message;
+	int i, count;
+	struct argument_details arg;
+	const char *signature;
+
+	signature = message->signature;
+	count = arg_count_for_signature(signature);
+	for (i = 0; i < count; i++) {
+		signature = get_next_argument(signature, &arg);
+
+		switch (arg.type) {
+		case 'h':
+			return 1;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return 0;
+}
+
 int
 wl_closure_send(struct wl_closure *closure, struct wl_connection *connection)
 {
@@ -1184,6 +1209,11 @@ wl_closure_send(struct wl_closure *closure, struct wl_connection *connection)
 	uint32_t buffer_size;
 	uint32_t *buffer;
 	int result;
+	int need_flush;
+
+	need_flush = closure_has_fds(closure);
+	if (need_flush)
+		wl_connection_flush(connection);
 
 	if (copy_fds_to_connection(closure, connection))
 		return -1;
