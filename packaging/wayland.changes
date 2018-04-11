@@ -1,0 +1,38 @@
+* Tue Nov 15 2016 Sangjin Lee <lsj119@samsung.com> 1.10.0@a0d76ff
+- Update to 1.12.0
+
+* Tue April 05 2016 Sangjin Lee <lsj119@samsung.com> 1.10.0@0ff73b7
+- Update to 1.10.0
+
+* Mon Feb 16 2015 Manuel Bachmann <manuel.bachmann@open.eurogiciel.org> 1.7.0@8e9d5a1
+- Update to 1.7.0
+
+* Wed Nov 19 2014 Manuel Bachmann <manuel.bachmann@open.eurogiciel.org> 1.6.0@339e83a
+- Update to 1.6.0
+
+* Wed Feb 12 2014 Ossama Othman <ossama.othman@intel.com> 1.4.0@2450fe2
+- Update to 1.4.0
+
+* Thu Oct 17 2013 Ossama Othman <ossama.othman@intel.com> 1.3.0@2c3dbb8
+- Update to 1.3.0
+
+* Tue Jul 16 2013 Ossama Othman <ossama.othman@intel.com> 1.2.0@db1f961
+- Update to 1.2.0
+
+* Tue Jun 18 2013 Anas Nashif <anas.nashif@intel.com> accepted/tizen/20130606.153536@ff8eca6
+- Fixed gbs.conf
+
+* Wed Jun 05 2013 Rusty Lynch <rusty.lynch@intel.com> 1.1.0@55ad268
+- Updating to 1.1.0
+
+* Sat May 11 2013 Anas Nashif <anas.nashif@intel.com> submit/tizen/20130509.184835@8a428ae
+- Set license using %license
+
+* Fri Apr 05 2013 Anas Nashif <anas.nashif@intel.com> 1.0.6@413f185
+- Update to 1.0.6
+
+* Wed Feb 13 2013 Anas Nashif <anas.nashif@intel.com> accepted/trunk/20130207.031256@c0801a3
+- Update to 1.0.4
+
+* Mon Dec 17 2012 Anas Nashif <anas.nashif@intel.com> 1.0.3@d98211f
+- Update to 1.0.3
