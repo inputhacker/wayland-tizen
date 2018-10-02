@@ -326,7 +326,7 @@ wl_cursor_create_from_xcursor_images(XcursorImages *images,
 			old_shm_pool = theme->pool;
 			theme->pool = shm_pool_create(theme->shm, 2 * origin_size + size);
 			if (!theme->pool) {
-				shm_pool_destroy(old_shm_pool);
+				theme->pool = old_shm_pool;
 				free(image);
 				break;
 			}
