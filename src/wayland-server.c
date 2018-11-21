@@ -189,8 +189,15 @@ wl_resource_post_event_array(struct wl_resource *resource, uint32_t opcode,
 		return;
 	}
 
-	if (wl_closure_send(closure, resource->client->connection))
-		resource->client->error = 1;
+	if (wl_closure_send(closure, resource->client->connection)) {
+		if (errno == EAGAIN) {
+			wl_event_source_fd_update(resource->client->source,
+						  WL_EVENT_WRITABLE |
+						  WL_EVENT_READABLE);
+		} else {
+			resource->client->error = 1;
+		}
+	}
 
 	if (wl_server_debug_func)
 		wl_server_debug_func(closure, resource, true);
