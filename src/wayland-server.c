@@ -225,8 +225,15 @@ handle_array(struct wl_resource *resource, uint32_t opcode,
 
 	log_closure(resource, closure, true);
 
-	if (send_func(closure, resource->client->connection))
-		resource->client->error = 1;
+	if (send_func(closure, resource->client->connection)) {
+		if (errno == EAGAIN) {
+			wl_event_source_fd_update(resource->client->source,
+						  WL_EVENT_WRITABLE |
+						  WL_EVENT_READABLE);
+		} else {
+			resource->client->error = 1;
+		}
+	}
 
 	wl_closure_destroy(closure);
 }
