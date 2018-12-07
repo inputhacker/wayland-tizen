@@ -138,6 +138,11 @@ struct wl_display {
 
 /** \endcond */
 
+// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
+static void log_threads_reader_info(struct wl_display *display);
+static void try_read_display(struct wl_display *display);
+// END
+
 /**
  * This helper function wakes up all threads that are
  * waiting for display->reader_cond (i. e. when reading is done,
@@ -1667,6 +1672,54 @@ dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 	destroy_queued_closure(closure);
 }
 
+// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
+static void
+log_threads_reader_info(struct wl_display *display)
+{
+	struct wl_thread_data *thread_data;
+	struct wl_thread_data *th_data, *th_data_next;
+	int thread_cnt = 0, res = 0, total;
+
+	thread_data = get_thread_data(display);
+	assert(thread_data);
+
+	wl_log("[thread info] current pid : %d, tid : %d\n", thread_data->pid, thread_data->tid);
+
+	wl_log("[thread info] display->reader_count : %d\n", display->reader_count);
+	wl_list_for_each_safe(th_data, th_data_next, &display->threads, link) {
+		wl_log("[thread info] thread[%d][PID:%d][TID:%d] reader_count_in_thread:%d, state:%d\n",
+				thread_cnt++, th_data->pid, th_data->tid,
+				th_data->reader_count_in_thread, th_data->state);
+	}
+}
+
+static void
+try_read_display(struct wl_display *display)
+{
+	struct pollfd pfd[1];
+
+	int res = 0, total;
+
+	pfd[0].fd = display->fd;
+	pfd[0].events = POLLIN;
+
+	do {
+		res = poll(pfd, 1, 0);//timeout 0 : return immediately
+	} while (res == -1 && errno == EINTR);
+
+	if (res > 0)
+	{
+		total = wl_connection_read(display->connection);
+		wl_log("[try read display] connection read count : %d, error : %d\n", total, errno);
+	}
+	else
+	{
+		wl_log("[try read display] display fd(%d) is not set ! There is nothing to read.\n", display->fd);
+		wl_log("[try read display] poll(%d) returns %d (errno:%d)\n", display->fd, res, errno);
+	}
+}
+// END
+
 static int
 read_events(struct wl_display *display)
 {
@@ -1675,11 +1728,9 @@ read_events(struct wl_display *display)
 	uint32_t serial;
 
 	// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
-	struct wl_thread_data *th_data, *th_data_next;
 	struct timeval now;
 	struct timespec ts;
-	struct pollfd pfd[1];
-	int ret = 0, thread_cnt = 0, res = 0;
+	int ret = 0;
 	// END
 
 	thread_data = get_thread_data(display);
@@ -1690,6 +1741,12 @@ read_events(struct wl_display *display)
 	if (thread_data->reader_count_in_thread) {
 		wl_log("read_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)", thread_data, thread_data->pid, thread_data->tid,
 						thread_data->reader_count_in_thread, display->reader_count);
+
+		// TIZEN_ONLY(20181211) : wayland-client : do abort() when a thread specific reader count > 1
+		log_threads_reader_info(display);
+		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
+				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+		// END
 	}
 
 	if (display->reader_count == 0) {
@@ -1754,33 +1811,11 @@ read_events(struct wl_display *display)
 			if (ETIMEDOUT == ret)
 			{
 				wl_log("=== Timeout on pthread_cond_timedwait. Start leaving data !===\n");
-				wl_log("[Error data] current pid : %d, tid : %d\n", thread_data->pid, thread_data->tid);
 
-				pfd[0].fd = display->fd;
-				pfd[0].events = POLLIN;
-				do {
-					res = poll(pfd, 1, 0);//timeout 0 : return immediately
-				} while (res == -1 && errno == EINTR);
+				log_threads_reader_info(display);
+				try_read_display(display);
 
-				if (res > 0)
-				{
-					total = wl_connection_read(display->connection);
-					wl_log("[Error data] connection read count : %d, error : %d\n", total, errno);
-				}
-				else
-				{
-					wl_log("[Error data] display fd(%d) is not set ! There is nothing to read.\n", display->fd);
-					wl_log("[Error data] poll(%d) returns %d (errno:%d)\n", display->fd, res, errno);
-				}
-
-				wl_log("[Error data] display->read_serial : %d, serial : %d\n", display->read_serial, serial);
-				wl_log("[Error data] display->reader_count : %d\n", display->reader_count);
-				wl_list_for_each_safe(th_data, th_data_next, &display->threads, link) {
-					wl_log("[Error data] thread[%d][PID:%d][TID:%d] reader_count_in_thread:%d, state:%d\n",
-							thread_cnt++, th_data->pid, th_data->tid,
-							th_data->reader_count_in_thread, th_data->state);
-				}
-
+				wl_log("[read events] display->read_serial : %d, serial : %d\n", display->read_serial, serial);
 				wl_log("=== Timeout on pthread_cond_timedwait. End of data leaving !===\n");
 				wl_abort("=== Timeout on pthread_cond_timedwait : abort !, error(%d) ===\n", ret);
 			}
@@ -1819,6 +1854,12 @@ cancel_read(struct wl_display *display)
 	if (thread_data->reader_count_in_thread) {
 		wl_log("Cancel_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)\n", thread_data, thread_data->pid, thread_data->tid,
 						thread_data->reader_count_in_thread, display->reader_count);
+
+		// TIZEN_ONLY(20181211) : wayland-client : do abort() when a thread specific reader count > 1
+		log_threads_reader_info(display);
+		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
+				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+		// END
 	}
 	
 	if (display->reader_count == 0)
@@ -1994,6 +2035,12 @@ wl_display_prepare_read_queue(struct wl_display *display,
 			display->reader_count++;
 		else {
 			wl_log("Prepare_read[%d]: check reader count(T:%d, A:%d)\n", thread_data->tid, thread_data->reader_count_in_thread, display->reader_count);
+
+			// TIZEN_ONLY(20181211) : wayland-client : do abort() when a thread specific reader count > 1
+			log_threads_reader_info(display);
+			wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
+					thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+			// END
 		}
 
 		thread_data->reader_count_in_thread++;
