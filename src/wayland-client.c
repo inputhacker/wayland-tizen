@@ -43,6 +43,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 #include "wayland-util.h"
 #include "wayland-os.h"
@@ -50,6 +51,10 @@
 #include "wayland-private.h"
 
 //#define WL_DEBUG_QUEUE
+
+// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
+#define WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT 2
+// END
 
 /** \cond */
 
@@ -1669,6 +1674,14 @@ read_events(struct wl_display *display)
 	int total, rem, size;
 	uint32_t serial;
 
+	// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
+	struct wl_thread_data *th_data, *th_data_next;
+	struct timeval now;
+	struct timespec ts;
+	struct pollfd pfd[1];
+	int ret = 0, thread_cnt = 0, res = 0;
+	// END
+
 	thread_data = get_thread_data(display);
 	assert(thread_data);
 
@@ -1722,9 +1735,61 @@ read_events(struct wl_display *display)
 		display_wakeup_threads(display);
 	} else {
 		serial = display->read_serial;
+
+		// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
+		gettimeofday(&now, NULL);
+		ts.tv_sec = now.tv_sec + WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT;
+		ts.tv_nsec = now.tv_usec * 1000;
+		// END
+
 		while (display->read_serial == serial)
-			pthread_cond_wait(&display->reader_cond,
-					  &display->mutex);
+		{
+			// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
+			//pthread_cond_wait(&display->reader_cond,
+			//				&display->mutex);
+
+			ret = pthread_cond_timedwait(&display->reader_cond,
+					  &display->mutex, &ts);
+
+			if (ETIMEDOUT == ret)
+			{
+				wl_log("=== Timeout on pthread_cond_timedwait. Start leaving data !===\n");
+				wl_log("[Error data] current pid : %d, tid : %d\n", thread_data->pid, thread_data->tid);
+
+				pfd[0].fd = display->fd;
+				pfd[0].events = POLLIN;
+				do {
+					res = poll(pfd, 1, 0);//timeout 0 : return immediately
+				} while (res == -1 && errno == EINTR);
+
+				if (res > 0)
+				{
+					total = wl_connection_read(display->connection);
+					wl_log("[Error data] connection read count : %d, error : %d\n", total, errno);
+				}
+				else
+				{
+					wl_log("[Error data] display fd(%d) is not set ! There is nothing to read.\n", display->fd);
+					wl_log("[Error data] poll(%d) returns %d (errno:%d)\n", display->fd, res, errno);
+				}
+
+				wl_log("[Error data] display->read_serial : %d, serial : %d\n", display->read_serial, serial);
+				wl_log("[Error data] display->reader_count : %d\n", display->reader_count);
+				wl_list_for_each_safe(th_data, th_data_next, &display->threads, link) {
+					wl_log("[Error data] thread[%d][PID:%d][TID:%d] reader_count_in_thread:%d, state:%d\n",
+							thread_cnt++, th_data->pid, th_data->tid,
+							th_data->reader_count_in_thread, th_data->state);
+				}
+
+				wl_log("=== Timeout on pthread_cond_timedwait. End of data leaving !===\n");
+				wl_abort("=== Timeout on pthread_cond_timedwait : abort !, error(%d) ===\n", ret);
+			}
+			else if (ret)
+			{
+				wl_log("=== Error waiting pthread_cond_timedwait : continue, errno(%d) ===\n", ret);
+			}
+			// END
+		}
 
 		if (display->last_error) {
 			errno = display->last_error;
