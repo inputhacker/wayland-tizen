@@ -92,12 +92,27 @@ struct wl_event_queue {
 	struct wl_display *display;
 };
 
+typedef enum
+{
+	WL_THREAD_STATE_INITIAL = 0,
+	WL_THREAD_STATE_PREPARE_READ = 1 << 1,
+	WL_THREAD_STATE_POLL_DONE = 1 << 2,
+	WL_THREAD_STATE_READ_EVENTS_BEGIN = 1 << 3,
+	WL_THREAD_STATE_READ_EVENTS_DONE = 1 << 4,
+	WL_THREAD_STATE_READ_EVENTS_CANCELD = 1 << 5,
+	WL_THREAD_STATE_WAIT_WAKEUP_BEGIN = 1 << 6,
+	WL_THREAD_STATE_WAIT_WAKEUP_DONE = 1 << 7,
+	WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT = 1 << 8,
+	WL_THREAD_STATE_WAIT_WAKEUP_ERROR = 1 << 9
+} thread_state;
+
 struct wl_thread_data {
 	struct wl_list link;
 	int reader_count_in_thread;
-	int state;
 	int pid;
 	int tid;
+	thread_state state;
+	pthread_t thread_id;
 };
 
 struct wl_display {
@@ -1046,6 +1061,7 @@ get_thread_data(struct wl_display *display)
 
 		thread_data->pid = (int)getpid();
 		thread_data->tid = (int)syscall(SYS_gettid);
+		thread_data->state = WL_THREAD_STATE_INITIAL;
 		wl_list_insert(&display->threads, &thread_data->link);
 		wl_log("Thread added[%p, pid:%d tid: %d] to display:%p\n", thread_data, thread_data->pid, thread_data->tid, display);
 	}
@@ -1722,13 +1738,13 @@ read_events(struct wl_display *display)
 	// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
 	struct timeval now;
 	struct timespec ts;
-	int remain_sec = 0;
-	int remain_usec = 0;
 	int ret = 0;
 	// END
 
 	thread_data = get_thread_data(display);
 	assert(thread_data);
+
+	thread_data->state |= WL_THREAD_STATE_POLL_DONE;
 
 	thread_data->reader_count_in_thread--;
 	display->reader_count--;
@@ -1746,11 +1762,14 @@ read_events(struct wl_display *display)
 	}
 
 	if (display->reader_count == 0) {
+		thread_data->state |=  WL_THREAD_STATE_READ_EVENTS_BEGIN;
 		total = wl_connection_read(display->connection);
 		if (total < 0 && errno != EAGAIN && errno != EPIPE)
 			wl_log("read failed: total(%d) errno(%d)", total, errno);
 		if (total == -1) {
 			if (errno == EAGAIN) {
+				thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
+
 				/* we must wake up threads whenever
 				 * the reader_count dropped to 0 */
 				display_wakeup_threads(display);
@@ -1765,6 +1784,8 @@ read_events(struct wl_display *display)
 			display_fatal_error(display, errno);
 			return -1;
 		} else if (total == 0) {
+			thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
+
 			/* The compositor has closed the socket. This
 			 * should be considered an error so we'll fake
 			 * an errno */
@@ -1777,6 +1798,7 @@ read_events(struct wl_display *display)
 		for (rem = total; rem >= 8; rem -= size) {
 			size = queue_event(display, rem);
 			if (size == -1) {
+				thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
 				wl_log("queue_event failed\n");
 				display_fatal_error(display, errno);
 				return -1;
@@ -1786,6 +1808,7 @@ read_events(struct wl_display *display)
 		}
 
 		display_wakeup_threads(display);
+		thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
 	} else {
 		serial = display->read_serial;
 
@@ -1800,23 +1823,17 @@ read_events(struct wl_display *display)
 
 			gettimeofday(&now, NULL);
 
-			remain_sec = 0;
-			remain_usec = 100000;// 100ms
+			ts.tv_nsec = now.tv_usec * 1000;
+			ts.tv_sec = now.tv_sec + WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT;// 2 seconds
 
-			if ((now.tv_usec + remain_usec) >= 1000000)
-			{
-				remain_sec++;
-				remain_usec = 1000000 - (now.tv_usec+remain_usec);
-			}
-
-			ts.tv_nsec = (now.tv_usec + remain_usec) * 1000;
-			ts.tv_sec = now.tv_sec + remain_sec;
-
+			thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_BEGIN;
 			ret = pthread_cond_timedwait(&display->reader_cond,
 					  &display->mutex, &ts);
+			thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_DONE;
 
 			if (ETIMEDOUT == ret)
 			{
+				thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT;
 				deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Timeout on pthread_cond_timedwait. Start leaving data !===\n");
 				wl_log("=== Timeout on pthread_cond_timedwait. Start leaving data !===\n");
 
@@ -1830,12 +1847,11 @@ read_events(struct wl_display *display)
 				deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Timeout on pthread_cond_timedwait : abort !, error(%d) ===\n", ret);
 				wl_abort("=== Timeout on pthread_cond_timedwait : abort !, error(%d) ===\n", ret);
 			}
-#if 0
 			else if (ret)
 			{
+				thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_ERROR;
 				wl_log("=== Error waiting pthread_cond_timedwait : continue, errno(%d) ===\n", ret);
 			}
-#endif
 			// END
 		}
 
@@ -1882,6 +1898,8 @@ cancel_read(struct wl_display *display)
 
 	if (thread_data->reader_count_in_thread > 0)
 		display->reader_count++;
+
+	thread_data->state |= WL_THREAD_STATE_READ_EVENTS_CANCELD;
 }
 
 /** Read events from display file descriptor
@@ -2060,6 +2078,7 @@ wl_display_prepare_read_queue(struct wl_display *display,
 			// END
 		}
 
+		thread_data->state = WL_THREAD_STATE_PREPARE_READ;
 		thread_data->reader_count_in_thread++;
 		ret = 0;
 	}
