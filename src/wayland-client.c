@@ -95,15 +95,17 @@ struct wl_event_queue {
 typedef enum
 {
 	WL_THREAD_STATE_INITIAL = 0,
-	WL_THREAD_STATE_PREPARE_READ = 1 << 1,
-	WL_THREAD_STATE_POLL_DONE = 1 << 2,
-	WL_THREAD_STATE_READ_EVENTS_BEGIN = 1 << 3,
-	WL_THREAD_STATE_READ_EVENTS_DONE = 1 << 4,
-	WL_THREAD_STATE_READ_EVENTS_CANCELD = 1 << 5,
-	WL_THREAD_STATE_WAIT_WAKEUP_BEGIN = 1 << 6,
-	WL_THREAD_STATE_WAIT_WAKEUP_DONE = 1 << 7,
-	WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT = 1 << 8,
-	WL_THREAD_STATE_WAIT_WAKEUP_ERROR = 1 << 9
+	WL_THREAD_STATE_PREPARE_READ = 1 << 0,
+	WL_THREAD_STATE_POLL_DONE = 1 << 1,
+	WL_THREAD_STATE_READ_EVENTS_BEGIN = 1 << 2,
+	WL_THREAD_STATE_READ_EVENTS_DONE = 1 << 3,
+	WL_THREAD_STATE_READ_EVENTS_CANCELD = 1 << 4,
+	WL_THREAD_STATE_WAIT_WAKEUP_BEGIN = 1 << 5,
+	WL_THREAD_STATE_WAIT_WAKEUP_DONE = 1 << 6,
+	WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT = 1 << 7,
+	WL_THREAD_STATE_WAIT_WAKEUP_ERROR = 1 << 8,
+	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_BEGIN = 1 << 9,
+	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE = 1 << 10
 } thread_state;
 
 struct wl_thread_data {
@@ -155,9 +157,6 @@ struct wl_display {
 
 // TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
 static void log_threads_reader_info(struct wl_display *display);
-static void try_read_display(struct wl_display *display);
-char deadlock_log_buf[16384];
-int deadlock_log_nwrite;
 // END
 
 /**
@@ -1062,6 +1061,7 @@ get_thread_data(struct wl_display *display)
 		thread_data->pid = (int)getpid();
 		thread_data->tid = (int)syscall(SYS_gettid);
 		thread_data->state = WL_THREAD_STATE_INITIAL;
+		thread_data->thread_id = pthread_self();
 		wl_list_insert(&display->threads, &thread_data->link);
 		wl_log("Thread added[%p, pid:%d tid: %d] to display:%p\n", thread_data, thread_data->pid, thread_data->tid, display);
 	}
@@ -1701,32 +1701,52 @@ log_threads_reader_info(struct wl_display *display)
 	thread_data = get_thread_data(display);
 	assert(thread_data);
 
-	deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "[thread info] current pid : %d, tid : %d\n", thread_data->pid, thread_data->tid);
 	wl_log("[thread info] current pid : %d, tid : %d\n", thread_data->pid, thread_data->tid);
-
-	deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "[thread info] display->reader_count : %d\n", display->reader_count);
 	wl_log("[thread info] display->reader_count : %d\n", display->reader_count);
+
 	wl_list_for_each_safe(th_data, th_data_next, &display->threads, link) {
-		deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "[thread info] thread[%d][PID:%d][TID:%d] reader_count_in_thread:%d, state:%d\n",
-				thread_cnt, th_data->pid, th_data->tid,
-				th_data->reader_count_in_thread, th_data->state);
-		wl_log("[thread info] thread[%d][PID:%d][TID:%d] reader_count_in_thread:%d, state:%d\n",
-				thread_cnt++, th_data->pid, th_data->tid,
-				th_data->reader_count_in_thread, th_data->state);
+		wl_log("[thread info] thread[%d][PID:%d][TID:%d][id:%lu] reader_count_in_thread:%d, state:%d\n",
+				thread_cnt++, th_data->pid, th_data->tid, th_data->thread_id, th_data->reader_count_in_thread, th_data->state);
 	}
 }
+// END
 
 static void
-try_read_display(struct wl_display *display)
+force_sync_callback(void *data, struct wl_callback *callback, uint32_t serial)
 {
-	int total;
-
-	total = wl_connection_read(display->connection);
-	deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "[try read display] connection read count : %d, error : %d\n", total, errno);
-	wl_log("[try read display] connection read count : %d, error : %d\n", total, errno);
-
+	wl_callback_destroy(callback);
+	wl_log("[force_sync_callback] serial=%d\n", serial);
 }
-// END
+
+static const struct wl_callback_listener force_sync_listener = {
+	force_sync_callback
+};
+
+static int
+force_display_sync(struct wl_display *display)
+{
+	struct wl_callback *callback;
+	int ret = 0;
+
+	callback = wl_display_sync(display);
+
+	if (!callback)
+	{
+		wl_log("[force_display_sync] failed to get a callback !\n");
+		return -2;
+	}
+
+	wl_callback_add_listener(callback, &force_sync_listener, NULL);
+
+	ret = wl_connection_flush(display->connection);
+	if (ret < 0 && errno != EAGAIN && errno != EPIPE)
+		display_fatal_error(display, errno);
+
+	if (ret < 0)
+		wl_log("[force_display_sync] error on flushing display (ret:%d, errno:%d)\n", ret, errno);
+
+	return ret;
+}
 
 static int
 read_events(struct wl_display *display)
@@ -1738,7 +1758,7 @@ read_events(struct wl_display *display)
 	// TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
 	struct timeval now;
 	struct timespec ts;
-	int ret = 0;
+	int ret = 0, res = 0;
 	// END
 
 	thread_data = get_thread_data(display);
@@ -1754,8 +1774,6 @@ read_events(struct wl_display *display)
 
 		// TIZEN_ONLY(20181211) : wayland-client : do abort() when a thread specific reader count > 1
 		log_threads_reader_info(display);
-		deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
-				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
 		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
 				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
 		// END
@@ -1834,18 +1852,20 @@ read_events(struct wl_display *display)
 			if (ETIMEDOUT == ret)
 			{
 				thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT;
-				deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Timeout on pthread_cond_timedwait. Start leaving data !===\n");
-				wl_log("=== Timeout on pthread_cond_timedwait. Start leaving data !===\n");
-
+				wl_log("=== Timeout on pthread_cond_timedwait. Start leaving data (timeout=%d)!===\n", WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT);
 				log_threads_reader_info(display);
-				try_read_display(display);
-
-				deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "[read events] display->read_serial : %d, serial : %d\n", display->read_serial, serial);
 				wl_log("[read events] display->read_serial : %d, serial : %d\n", display->read_serial, serial);
-				deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Timeout on pthread_cond_timedwait. End of data leaving !===\n");
 				wl_log("=== Timeout on pthread_cond_timedwait. End of data leaving !===\n");
-				deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Timeout on pthread_cond_timedwait : abort !, error(%d) ===\n", ret);
-				wl_abort("=== Timeout on pthread_cond_timedwait : abort !, error(%d) ===\n", ret);
+
+				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_BEGIN;
+				wl_log("=== FORCE_DISPLAY_SYNC BEGIN ===\n");
+
+				pthread_mutex_unlock(&display->mutex);
+				res = force_display_sync(display);
+				pthread_mutex_lock(&display->mutex);
+
+				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE;
+				wl_log("=== FORCE_DISPLAY_SYNC DONE (res=%d) ===\n", res);
 			}
 			else if (ret)
 			{
@@ -1886,8 +1906,6 @@ cancel_read(struct wl_display *display)
 
 		// TIZEN_ONLY(20181211) : wayland-client : do abort() when a thread specific reader count > 1
 		log_threads_reader_info(display);
-		deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
-				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
 		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
 				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
 		// END
@@ -2071,8 +2089,6 @@ wl_display_prepare_read_queue(struct wl_display *display,
 
 			// TIZEN_ONLY(20181211) : wayland-client : do abort() when a thread specific reader count > 1
 			log_threads_reader_info(display);
-			deadlock_log_nwrite += sprintf(deadlock_log_buf+deadlock_log_nwrite, "=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
-					thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
 			wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
 					thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
 			// END
