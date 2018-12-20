@@ -105,7 +105,8 @@ typedef enum
 	WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT = 1 << 7,
 	WL_THREAD_STATE_WAIT_WAKEUP_ERROR = 1 << 8,
 	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_BEGIN = 1 << 9,
-	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE = 1 << 10
+	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE = 1 << 10,
+	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_ERROR = 1 << 11
 } thread_state;
 
 struct wl_thread_data {
@@ -1866,6 +1867,22 @@ read_events(struct wl_display *display)
 
 				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE;
 				wl_log("=== FORCE_DISPLAY_SYNC DONE (res=%d) ===\n", res);
+
+				//Return if there is any error on doing display sync and leave display protocol error if exits
+				if (res < 0)
+				{
+					thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_ERROR;
+					wl_log("=== FORCE_DISPLAY_SYNC ERROR (res=%d) ===\n", res);
+
+					if (display->last_error)
+					{
+						wl_log("[read_events] last_error(%d)\n", display->last_error);
+						display_print_protocol_error_information(display, display->last_error);
+						errno = display->last_error;
+					}
+
+					return -1;
+				}
 			}
 			else if (ret)
 			{
