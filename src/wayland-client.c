@@ -53,7 +53,7 @@
 //#define WL_DEBUG_QUEUE
 
 // TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
-#define WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT 2
+#define WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT 5
 // END
 
 /** \cond */
@@ -152,6 +152,7 @@ struct wl_display {
 
 	pthread_key_t thread_data_key;
 	struct wl_list	threads;
+	uint32_t force_sync_count;
 };
 
 /** \endcond */
@@ -1254,6 +1255,7 @@ wl_display_connect_to_fd(int fd)
 	pthread_mutex_lock(&display->mutex);
 	pthread_cond_init(&display->reader_cond, NULL);
 	display->reader_count = 0;
+	display->force_sync_count = 0;
 
 	wl_map_insert_new(&display->objects, 0, NULL);
 
@@ -1843,7 +1845,7 @@ read_events(struct wl_display *display)
 			gettimeofday(&now, NULL);
 
 			ts.tv_nsec = now.tv_usec * 1000;
-			ts.tv_sec = now.tv_sec + WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT;// 2 seconds
+			ts.tv_sec = now.tv_sec + WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT;// 5 seconds
 
 			thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_BEGIN;
 			ret = pthread_cond_timedwait(&display->reader_cond,
@@ -1864,9 +1866,10 @@ read_events(struct wl_display *display)
 				pthread_mutex_unlock(&display->mutex);
 				res = force_display_sync(display);
 				pthread_mutex_lock(&display->mutex);
+				display->force_sync_count++;
 
 				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE;
-				wl_log("=== FORCE_DISPLAY_SYNC DONE (res=%d) ===\n", res);
+				wl_log("=== FORCE_DISPLAY_SYNC DONE (res=%d, force_sync_count=%d) ===\n", res, display->force_sync_count);
 
 				//Return if there is any error on doing display sync and leave display protocol error if exits
 				if (res < 0)
