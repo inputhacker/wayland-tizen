@@ -53,7 +53,7 @@
 //#define WL_DEBUG_QUEUE
 
 // TIZEN_ONLY(20181207): wayland-client : leave log about threads information and abort when pthread_cond_timedwait() returns ETIMEDOUT
-#define WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT 5
+#define WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT 10
 // END
 
 /** \cond */
@@ -1731,6 +1731,8 @@ force_display_sync(struct wl_display *display)
 	struct wl_callback *callback;
 	int ret = 0;
 
+	pthread_mutex_unlock(&display->mutex);
+
 	callback = wl_display_sync(display);
 
 	if (!callback)
@@ -1741,6 +1743,15 @@ force_display_sync(struct wl_display *display)
 
 	wl_callback_add_listener(callback, &force_sync_listener, NULL);
 
+	pthread_mutex_lock(&display->mutex);
+
+	if (display->last_error)
+		wl_log("[force_display_sync] display->last_error:%d, errno:%d\n", display->last_error, errno);
+
+	/* We don't make EPIPE a fatal error here, so that we may try to
+	 * read events after the failed flush. When the compositor sends
+	 * an error it will close the socket, and if we make EPIPE fatal
+	 * here we don't get a chance to process the error. */
 	ret = wl_connection_flush(display->connection);
 	if (ret < 0 && errno != EAGAIN && errno != EPIPE)
 		display_fatal_error(display, errno);
@@ -1845,7 +1856,7 @@ read_events(struct wl_display *display)
 			gettimeofday(&now, NULL);
 
 			ts.tv_nsec = now.tv_usec * 1000;
-			ts.tv_sec = now.tv_sec + WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT;// 5 seconds
+			ts.tv_sec = now.tv_sec + WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT;// 10 seconds
 
 			thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_BEGIN;
 			ret = pthread_cond_timedwait(&display->reader_cond,
@@ -1863,9 +1874,7 @@ read_events(struct wl_display *display)
 				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_BEGIN;
 				wl_log("=== FORCE_DISPLAY_SYNC BEGIN ===\n");
 
-				pthread_mutex_unlock(&display->mutex);
 				res = force_display_sync(display);
-				pthread_mutex_lock(&display->mutex);
 				display->force_sync_count++;
 
 				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE;
