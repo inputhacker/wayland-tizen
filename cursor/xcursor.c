@@ -1061,6 +1061,7 @@ xcursor_load_theme_cursor_name(const char *theme, int size,
 			if (found) {
 				free(dir);
 				dir = NULL;
+				if (inherits) free(inherits);
 				return 1;
 			}
 		}
