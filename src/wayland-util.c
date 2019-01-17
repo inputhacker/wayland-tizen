@@ -42,6 +42,7 @@
 
 int debug_client = 0;
 int debug_server = 0;
+int wl_abort_errno = 0;
 
 WL_EXPORT void
 wl_list_init(struct wl_list *list)
@@ -473,7 +474,10 @@ wl_abort(const char *fmt, ...)
 {
 	va_list argp;
 
+	wl_abort_errno = errno;
+
 #ifdef HAVE_DLOG
+	dlog_print(DLOG_ERROR, WLLOG_TAG, "[wl_abort] abort_errno=%d (%s)", wl_abort_errno, strerror(wl_abort_errno));
 	va_start(argp, fmt);
 	dlog_vprint(DLOG_ERROR, WLLOG_TAG, fmt, argp);
 	va_end(argp);
