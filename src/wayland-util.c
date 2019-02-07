@@ -473,11 +473,17 @@ void
 wl_abort(const char *fmt, ...)
 {
 	va_list argp;
+	char buf[256] = { 0, };
+	int ret_strerror_r = -1;
 
 	wl_abort_errno = errno;
 
 #ifdef HAVE_DLOG
-	dlog_print(DLOG_ERROR, WLLOG_TAG, "[wl_abort] abort_errno=%d (%s)", wl_abort_errno, strerror(wl_abort_errno));
+	ret_strerror_r = strerror_r(wl_abort_errno, buf, sizeof(buf));
+
+	if (ret_strerror_r == 0)
+		dlog_print(DLOG_ERROR, WLLOG_TAG, "[wl_abort] abort_errno=%d (%s)", wl_abort_errno, buf);
+
 	va_start(argp, fmt);
 	dlog_vprint(DLOG_ERROR, WLLOG_TAG, fmt, argp);
 	va_end(argp);
