@@ -1,4 +1,4 @@
-%define EGL_PACKAGE 0
+%define EGL_PACKAGE 1
 
 Name:		wayland
 Version:	1.17.0
