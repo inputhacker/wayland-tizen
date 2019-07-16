@@ -43,6 +43,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 #include "wayland-util.h"
 #include "wayland-os.h"
@@ -50,6 +51,10 @@
 #include "wayland-private.h"
 
 //#define WL_DEBUG_QUEUE
+
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+#define WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT 10
+// END
 
 /** \cond */
 
@@ -80,12 +85,35 @@ struct wl_event_queue {
 	struct wl_display *display;
 };
 
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+/* thread status */
+typedef enum
+{
+	WL_THREAD_STATE_INITIAL = 0,
+	WL_THREAD_STATE_PREPARE_READ = 1 << 0,
+	WL_THREAD_STATE_POLL_DONE = 1 << 1,
+	WL_THREAD_STATE_READ_EVENTS_BEGIN = 1 << 2,
+	WL_THREAD_STATE_READ_EVENTS_DONE = 1 << 3,
+	WL_THREAD_STATE_READ_EVENTS_CANCELD = 1 << 4,
+	WL_THREAD_STATE_WAIT_WAKEUP_BEGIN = 1 << 5,
+	WL_THREAD_STATE_WAIT_WAKEUP_DONE = 1 << 6,
+	WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT = 1 << 7,
+	WL_THREAD_STATE_WAIT_WAKEUP_ERROR = 1 << 8,
+	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_BEGIN = 1 << 9,
+	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE = 1 << 10,
+	WL_THREAD_STATE_FORCE_DISPLAY_SYNC_ERROR = 1 << 11
+} thread_state;
+// END
+
 struct wl_thread_data {
 	struct wl_list link;
 	int reader_count_in_thread;
-	int state;
 	int pid;
 	int tid;
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+	thread_state state;
+	pthread_t thread_id;
+// END
 };
 
 struct wl_display {
@@ -122,9 +150,18 @@ struct wl_display {
 
 	pthread_key_t thread_data_key;
 	struct wl_list	threads;
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+	uint32_t force_sync_count;
+// END
 };
 
 /** \endcond */
+
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+/* leave log about threads information and abort
+   when pthread_cond_timedwait() returns ETIMEDOUT */
+static void log_threads_reader_info(struct wl_display *display);
+// END
 
 /**
  * This helper function wakes up all threads that are
@@ -748,7 +785,7 @@ wl_proxy_marshal_array_constructor(struct wl_proxy *proxy,
 							    proxy->version);
 }
 
-// TIZEN_ONLY(20170328) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
+// TIZEN_ONLY(20190716) : leave log about pending requests from clients if sendmsg() fails due to EAGAIN error
 /** Print the client_entries of the wl_map
  * \param map  Pointer to wl_map.
  */
@@ -1030,6 +1067,10 @@ get_thread_data(struct wl_display *display)
 
 		thread_data->pid = (int)getpid();
 		thread_data->tid = (int)syscall(SYS_gettid);
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+		thread_data->state = WL_THREAD_STATE_INITIAL;
+		thread_data->thread_id = pthread_self();
+// END
 		wl_list_insert(&display->threads, &thread_data->link);
 		wl_log("Thread added[%p, pid:%d tid: %d] to display:%p\n", thread_data, thread_data->pid, thread_data->tid, display);
 	}
@@ -1221,6 +1262,9 @@ wl_display_connect_to_fd(int fd)
 	pthread_mutex_lock(&display->mutex);
 	pthread_cond_init(&display->reader_cond, NULL);
 	display->reader_count = 0;
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+	display->force_sync_count = 0;
+// END
 
 	wl_map_insert_new(&display->objects, 0, NULL);
 
@@ -1658,6 +1702,75 @@ dispatch_event(struct wl_display *display, struct wl_event_queue *queue)
 	destroy_queued_closure(closure);
 }
 
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+static void
+log_threads_reader_info(struct wl_display *display)
+{
+	struct wl_thread_data *thread_data;
+	struct wl_thread_data *th_data, *th_data_next;
+	int thread_cnt = 0;
+
+	thread_data = get_thread_data(display);
+	assert(thread_data);
+
+	wl_log("[thread info] current pid : %d, tid : %d\n", thread_data->pid, thread_data->tid);
+	wl_log("[thread info] display->reader_count : %d\n", display->reader_count);
+
+	wl_list_for_each_safe(th_data, th_data_next, &display->threads, link) {
+		wl_log("[thread info] thread[%d][PID:%d][TID:%d][id:%lu] reader_count_in_thread:%d, state:%d\n",
+				thread_cnt++, th_data->pid, th_data->tid, th_data->thread_id, th_data->reader_count_in_thread, th_data->state);
+	}
+}
+
+static void
+force_sync_callback(void *data, struct wl_callback *callback, uint32_t serial)
+{
+	wl_callback_destroy(callback);
+	wl_log("[force_sync_callback] serial=%d\n", serial);
+}
+
+static const struct wl_callback_listener force_sync_listener = {
+	force_sync_callback
+};
+
+static int
+force_display_sync(struct wl_display *display)
+{
+	struct wl_callback *callback;
+	int ret = 0;
+
+	pthread_mutex_unlock(&display->mutex);
+
+	callback = wl_display_sync(display);
+
+	if (!callback)
+	{
+		wl_log("[force_display_sync] failed to get a callback !\n");
+		return -2;
+	}
+
+	wl_callback_add_listener(callback, &force_sync_listener, NULL);
+
+	pthread_mutex_lock(&display->mutex);
+
+	if (display->last_error)
+		wl_log("[force_display_sync] display->last_error:%d, errno:%d\n", display->last_error, errno);
+
+	/* We don't make EPIPE a fatal error here, so that we may try to
+	 * read events after the failed flush. When the compositor sends
+	 * an error it will close the socket, and if we make EPIPE fatal
+	 * here we don't get a chance to process the error. */
+	ret = wl_connection_flush(display->connection);
+	if (ret < 0 && errno != EAGAIN && errno != EPIPE)
+		display_fatal_error(display, errno);
+
+	if (ret < 0)
+		wl_log("[force_display_sync] error on flushing display (ret:%d, errno:%d)\n", ret, errno);
+
+	return ret;
+}
+// END
+
 static int
 read_events(struct wl_display *display)
 {
@@ -1665,22 +1778,46 @@ read_events(struct wl_display *display)
 	int total, rem, size;
 	uint32_t serial;
 
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+	struct timeval now;
+	struct timespec ts;
+	int ret = 0, res = 0;
+// END
+
 	thread_data = get_thread_data(display);
 	assert(thread_data);
+
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+	thread_data->state |= WL_THREAD_STATE_POLL_DONE;
+// END
 
 	thread_data->reader_count_in_thread--;
 	display->reader_count--;
 	if (thread_data->reader_count_in_thread) {
 		wl_log("read_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)", thread_data, thread_data->pid, thread_data->tid,
 						thread_data->reader_count_in_thread, display->reader_count);
+
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+		/* do wl_abort() when a thread specific reader count > 1 */
+		log_threads_reader_info(display);
+		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
+				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+// END
 	}
 
 	if (display->reader_count == 0) {
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+		thread_data->state |=  WL_THREAD_STATE_READ_EVENTS_BEGIN;
+// END
 		total = wl_connection_read(display->connection);
 		if (total < 0 && errno != EAGAIN && errno != EPIPE)
 			wl_log("read failed: total(%d) errno(%d)", total, errno);
 		if (total == -1) {
 			if (errno == EAGAIN) {
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+				thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
+// END
+
 				/* we must wake up threads whenever
 				 * the reader_count dropped to 0 */
 				display_wakeup_threads(display);
@@ -1695,6 +1832,10 @@ read_events(struct wl_display *display)
 			display_fatal_error(display, errno);
 			return -1;
 		} else if (total == 0) {
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+			thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
+// END
+
 			/* The compositor has closed the socket. This
 			 * should be considered an error so we'll fake
 			 * an errno */
@@ -1707,6 +1848,9 @@ read_events(struct wl_display *display)
 		for (rem = total; rem >= 8; rem -= size) {
 			size = queue_event(display, rem);
 			if (size == -1) {
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+				thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
+// END
 				wl_log("queue_event failed\n");
 				display_fatal_error(display, errno);
 				return -1;
@@ -1716,11 +1860,68 @@ read_events(struct wl_display *display)
 		}
 
 		display_wakeup_threads(display);
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+		thread_data->state |= WL_THREAD_STATE_READ_EVENTS_DONE;
+// END
 	} else {
 		serial = display->read_serial;
 		while (display->read_serial == serial)
-			pthread_cond_wait(&display->reader_cond,
-					  &display->mutex);
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+		{
+			gettimeofday(&now, NULL);
+
+			ts.tv_nsec = now.tv_usec * 1000;
+			ts.tv_sec = now.tv_sec + WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT;// 10 seconds
+
+			thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_BEGIN;
+
+			ret = pthread_cond_timedwait(&display->reader_cond,
+					  &display->mutex, &ts);
+
+			thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_DONE;
+
+			if (ETIMEDOUT == ret)
+			{
+				thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_TIMEOUT;
+				wl_log("=== Timeout on pthread_cond_timedwait. Start leaving data (timeout=%d)!===\n", WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT);
+
+				log_threads_reader_info(display);
+
+				wl_log("[read events] display->read_serial : %d, serial : %d\n", display->read_serial, serial);
+				wl_log("=== Timeout on pthread_cond_timedwait. End of data leaving !===\n");
+
+				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_BEGIN;
+				wl_log("=== FORCE_DISPLAY_SYNC BEGIN ===\n");
+
+				res = force_display_sync(display);
+				display->force_sync_count++;
+
+				thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_DONE;
+				wl_log("=== FORCE_DISPLAY_SYNC DONE (res=%d, force_sync_count=%d) ===\n", res, display->force_sync_count);
+
+				/* return if there is any error on doing display sync and leave display protocol error if exits */
+				if (res < 0)
+				{
+					thread_data->state |= WL_THREAD_STATE_FORCE_DISPLAY_SYNC_ERROR;
+					wl_log("=== FORCE_DISPLAY_SYNC ERROR (res=%d) ===\n", res);
+
+					if (display->last_error)
+					{
+						wl_log("[read_events] last_error(%d)\n", display->last_error);
+						display_print_protocol_error_information(display, display->last_error);
+						errno = display->last_error;
+					}
+
+					return -1;
+				}
+			}
+			else if (ret)
+			{
+				thread_data->state |= WL_THREAD_STATE_WAIT_WAKEUP_ERROR;
+				wl_log("=== Error waiting pthread_cond_timedwait : continue, errno(%d) ===\n", ret);
+			}
+		}
+// END
 
 		if (display->last_error) {
 			errno = display->last_error;
@@ -1750,6 +1951,13 @@ cancel_read(struct wl_display *display)
 	if (thread_data->reader_count_in_thread) {
 		wl_log("Cancel_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)\n", thread_data, thread_data->pid, thread_data->tid,
 						thread_data->reader_count_in_thread, display->reader_count);
+
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+		/* do wl_abort() when a thread specific reader count > 1 */
+		log_threads_reader_info(display);
+		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
+				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+// END
 	}
 	
 	if (display->reader_count == 0)
@@ -1757,6 +1965,10 @@ cancel_read(struct wl_display *display)
 
 	if (thread_data->reader_count_in_thread > 0)
 		display->reader_count++;
+
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+	thread_data->state |= WL_THREAD_STATE_READ_EVENTS_CANCELD;
+// END
 }
 
 /** Read events from display file descriptor
@@ -1925,8 +2137,18 @@ wl_display_prepare_read_queue(struct wl_display *display,
 			display->reader_count++;
 		else {
 			wl_log("Prepare_read[%d]: check reader count(T:%d, A:%d)\n", thread_data->tid, thread_data->reader_count_in_thread, display->reader_count);
+
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+			/* do wl_abort() when a thread specific reader count > 1 */
+			log_threads_reader_info(display);
+			wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
+					thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+// END
 		}
 
+// TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
+		thread_data->state = WL_THREAD_STATE_PREPARE_READ;
+// END
 		thread_data->reader_count_in_thread++;
 		ret = 0;
 	}
