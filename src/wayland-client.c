@@ -1048,7 +1048,7 @@ destroy_thread_data(void *data)
 
 	wl_list_remove(&thread_data->link);
 	wl_log("Thread removed[%p pid:%d tid: %d]\n", thread_data, thread_data->pid, thread_data->tid);
-	
+
 	free(thread_data);
 }
 
@@ -1959,7 +1959,7 @@ cancel_read(struct wl_display *display)
 				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
 // END
 	}
-	
+
 	if (display->reader_count == 0)
 		display_wakeup_threads(display);
 
