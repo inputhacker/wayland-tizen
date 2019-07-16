@@ -302,7 +302,6 @@ wl_resource_post_error_vargs(struct wl_resource *resource,
 	struct wl_client *client = resource->client;
 	char buffer[128];
 	int pid;
-	va_list ap;
 
 	vsnprintf(buffer, sizeof buffer, msg, argp);
 
