@@ -1793,15 +1793,15 @@ read_events(struct wl_display *display)
 
 	thread_data->reader_count_in_thread--;
 	display->reader_count--;
-	if (thread_data->reader_count_in_thread) {
+	if (thread_data->reader_count_in_thread || display->reader_count < 0) {
 		wl_log("read_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)", thread_data, thread_data->pid, thread_data->tid,
 						thread_data->reader_count_in_thread, display->reader_count);
 
 // TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
 		/* do wl_abort() when a thread specific reader count > 1 */
 		log_threads_reader_info(display);
-		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
-				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+		wl_abort("=== Invalid reader count (pid:%d, tid:%d, reader_count:%d, reader_count_in_thread:%d) ===\n",
+				thread_data->pid, thread_data->tid, display->reader_count, thread_data->reader_count_in_thread);
 // END
 	}
 
@@ -1948,15 +1948,15 @@ cancel_read(struct wl_display *display)
 
 	thread_data->reader_count_in_thread--;
 	display->reader_count--;
-	if (thread_data->reader_count_in_thread) {
+	if (thread_data->reader_count_in_thread  || display->reader_count < 0) {
 		wl_log("Cancel_events[%p, pid:%d, tid:%d]: check reader count(T:%d, A:%d)\n", thread_data, thread_data->pid, thread_data->tid,
 						thread_data->reader_count_in_thread, display->reader_count);
 
 // TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
 		/* do wl_abort() when a thread specific reader count > 1 */
 		log_threads_reader_info(display);
-		wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
-				thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+		wl_abort("=== Invalid reader count (pid:%d, tid:%d, reader_count:%d, reader_count_in_thread:%d) ===\n",
+				thread_data->pid, thread_data->tid, display->reader_count, thread_data->reader_count_in_thread);
 // END
 	}
 
@@ -2141,8 +2141,8 @@ wl_display_prepare_read_queue(struct wl_display *display,
 // TIZEN_ONLY(20190716) : wayland-client : force sync of display when threads are waiting for over WL_PTHREAD_COND_TIMEDWAIT_TIMEOUT
 			/* do wl_abort() when a thread specific reader count > 1 */
 			log_threads_reader_info(display);
-			wl_abort("=== Invalid thread's reader count (pid:%d, tid:%d, reader_count_in_thread:%d) ===\n",
-					thread_data->pid, thread_data->tid, thread_data->reader_count_in_thread);
+			wl_abort("=== Invalid reader count (pid:%d, tid:%d, reader_count:%d, reader_count_in_thread:%d) ===\n",
+					thread_data->pid, thread_data->tid, display->reader_count, thread_data->reader_count_in_thread);
 // END
 		}
 
